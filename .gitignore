@@ -1,0 +1,15 @@
+# Секреты и состояние рантайма — НЕ коммитим в публичный репозиторий
+.env
+DEPLOYMENT.md
+data/
+*cookies*.txt
+bf_cookies.txt
+data_cookies*.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db

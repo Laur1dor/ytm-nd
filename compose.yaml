@@ -1,0 +1,33 @@
+services:
+  ytm-sync:
+    build: .
+    image: ytm-sync:latest
+    container_name: ytm-sync
+    restart: unless-stopped
+    environment:
+      PLAYLIST_URL: ${PLAYLIST_URL:?Set PLAYLIST_URL in .env}
+      YT_API_KEY: ${YT_API_KEY:-}                    # ключ YouTube Data API (надёжнее cookies)
+      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-14400}   # каждые 4 часа
+      MUSIC_SUBDIR: ${MUSIC_SUBDIR:-YouTube Music}
+      MUSIC_ROOT: /music
+      CONFIG_DIR: /config
+      # один альбom в Navidrome (чтобы не плодились сотни одиночных альбомов)
+      ALBUM_NAME: ${ALBUM_NAME:-YTM}
+      ALBUM_ARTIST: ${ALBUM_ARTIST:-YouTube Music}
+      # хранилище: REQUIRE_SHARE=true — гард «только на сетевую шару».
+      # Для локального диска/иного хранилища поставь false и подмонтируй нужную папку в /music.
+      REQUIRE_SHARE: ${REQUIRE_SHARE:-true}
+      # опциональное зеркало в S3/удалённое хранилище (rclone remote, напр. "s3:bucket/music").
+      # Пусто = выключено. Конфиг rclone клади в ./data/rclone.conf.
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-}
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      # rslave: контейнер видит перемонтирование шары на хосте без ребута контейнера
+      - type: bind
+        source: ${MUSIC_HOST_PATH:-/mnt/Music}
+        target: /music
+        bind:
+          propagation: rslave
+      - ./data:/config             # archive.txt, idmap.tsv, cookies.txt, replacements.tsv
+      - ./sync.py:/sync.py:ro      # скрипт правится без пересборки образа
+      - ./entrypoint.sh:/entrypoint.sh:ro
