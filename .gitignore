@@ -1,6 +1,7 @@
 # Секреты и состояние рантайма — НЕ коммитим в публичный репозиторий
 .env
 DEPLOYMENT.md
+PROJECT_DOSSIER.md
 data/
 *cookies*.txt
 bf_cookies.txt

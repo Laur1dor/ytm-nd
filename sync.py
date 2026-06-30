@@ -150,9 +150,12 @@ def reconcile_idmap_from_disk(idmap: dict) -> dict:
     return idmap
 
 
-def enforce_album_tags():
-    """Проставляет единый ALBUM/ALBUMARTIST на все файлы (чтобы в Navidrome был
-    один альбом, а не сотни одиночных). Уже размеченные пропускает."""
+def tag_files(ordered_rels):
+    """Один проход по файлам в порядке плейлиста:
+      * единый ALBUM/ALBUMARTIST — чтобы в Navidrome был один альбом, а не сотни;
+      * TRACKNUMBER = позиция в плейлисте — чтобы и АЛЬБОМ показывался в порядке
+        плейлиста (свежее сверху), а не по алфавиту исполнителей.
+    Пишет файл только если теги реально меняются."""
     try:
         from mutagen.oggopus import OggOpus
         from mutagen.oggvorbis import OggVorbis
@@ -160,50 +163,60 @@ def enforce_album_tags():
         from mutagen.easyid3 import EasyID3
         from mutagen.flac import FLAC
     except Exception as e:
-        log(f"mutagen недоступен, пропускаю теги альбома: {e}")
+        log(f"mutagen недоступен, пропускаю теги: {e}")
         return
+    total = len(ordered_rels)
     changed = 0
-    for p in DEST.rglob("*"):
-        if not p.is_file() or p.suffix.lower() not in AUDIO_EXTS:
+    for i, rel in enumerate(ordered_rels, start=1):
+        p = MUSIC_ROOT / rel
+        if not p.exists():
             continue
         ext = p.suffix.lower()
+        num = str(i)
         try:
             if ext == ".opus":
                 a = OggOpus(p)
-                if a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST:
+                if (a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST
+                        and a.get("tracknumber", [""])[0] == num):
                     continue
-                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a.save()
+                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a.save()
             elif ext in (".ogg", ".oga"):
                 a = OggVorbis(p)
-                if a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST:
+                if (a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST
+                        and a.get("tracknumber", [""])[0] == num):
                     continue
-                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a.save()
+                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a.save()
             elif ext in (".m4a", ".aac"):
                 a = MP4(p)
-                if a.tags and a.tags.get("\xa9alb", [""])[0] == ALBUM_NAME and a.tags.get("aART", [""])[0] == ALBUM_ARTIST:
+                t = a.tags or {}
+                cur = t.get("trkn", [(0, 0)])[0][0]
+                if (t.get("\xa9alb", [""])[:1] == [ALBUM_NAME] and t.get("aART", [""])[:1] == [ALBUM_ARTIST]
+                        and cur == i):
                     continue
-                a["\xa9alb"] = [ALBUM_NAME]; a["aART"] = [ALBUM_ARTIST]; a.save()
+                a["\xa9alb"] = [ALBUM_NAME]; a["aART"] = [ALBUM_ARTIST]; a["trkn"] = [(i, total)]; a.save()
             elif ext == ".mp3":
                 try:
                     a = EasyID3(p)
                 except Exception:
                     from mutagen.mp3 import MP3
                     mp3 = MP3(p); mp3.add_tags(); mp3.save(); a = EasyID3(p)
-                if a.get("album", [""])[:1] == [ALBUM_NAME] and a.get("albumartist", [""])[:1] == [ALBUM_ARTIST]:
+                if (a.get("album", [""])[:1] == [ALBUM_NAME] and a.get("albumartist", [""])[:1] == [ALBUM_ARTIST]
+                        and a.get("tracknumber", [""])[:1] == [num]):
                     continue
-                a["album"] = ALBUM_NAME; a["albumartist"] = ALBUM_ARTIST; a.save()
+                a["album"] = ALBUM_NAME; a["albumartist"] = ALBUM_ARTIST; a["tracknumber"] = num; a.save()
             elif ext == ".flac":
                 a = FLAC(p)
-                if a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST:
+                if (a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST
+                        and a.get("tracknumber", [""])[0] == num):
                     continue
-                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a.save()
+                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a.save()
             else:
                 continue
             changed += 1
         except Exception as e:
             log(f"не удалось проставить теги {p.name}: {e}")
     if changed:
-        log(f"проставлен альбом '{ALBUM_NAME}' на файлах: {changed}")
+        log(f"обновлены теги (альбом + номер по порядку плейлиста): {changed}")
 
 
 # --------------------------------------------------------------------------- #
@@ -289,8 +302,7 @@ log(f"скачиваю (client={PLAYER_CLIENT}, без cookies, пропуск �
 rc = subprocess.run(download_cmd).returncode
 log(f"yt-dlp скачивание завершено, rc={rc}")
 
-# 3) единый альбом + сверка карты по диску
-enforce_album_tags()
+# 3) сверка карты по диску (теги проставим ниже, по финальному порядку)
 idmap = reconcile_idmap_from_disk(load_tsv(IDMAP))
 save_tsv(IDMAP, idmap)
 log(f"всего в карте id->файл: {len(idmap)}")
@@ -303,7 +315,7 @@ if RCLONE_REMOTE:
     log(f"rclone -> {RCLONE_REMOTE}/{SUBDIR}")
     subprocess.run(cmd)
 
-# 5) .m3u в порядке плейлиста (с учётом замен)
+# 5) .m3u в порядке плейлиста (с учётом замен) + «лишние» файлы в конец
 replacements = load_tsv(REPL)
 lines, pruned = [], False
 for vid in ordered_ids:
@@ -315,7 +327,19 @@ for vid in ordered_ids:
             idmap.pop(vid, None); pruned = True
         continue
     lines.append(rel)
+
+# файлы, лежащие в папке, но не входящие в плейлист (предсуществующие/ручные) — в конец
+in_playlist = set(lines)
+extras = sorted(rel_of(p) for p in DEST.rglob("*")
+                if p.is_file() and p.suffix.lower() in AUDIO_EXTS and rel_of(p) not in in_playlist)
+if extras:
+    log(f"добавляю в конец плейлиста файлов вне плейлиста: {len(extras)}")
+lines += extras
+
 M3U.write_text("".join(f"{l}\n" for l in lines), encoding="utf-8")
 if pruned:
     save_tsv(IDMAP, idmap)
+
+# единый альбом + номера треков по финальному порядку (свежее сверху)
+tag_files(lines)
 log(f"записан плейлист {M3U} — {len(lines)} треков")

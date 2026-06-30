@@ -10,6 +10,9 @@ playlist.
 
 Runs as a single Docker Compose service next to your Navidrome container.
 
+> 📖 **Full step-by-step guide** (install, internals, maintenance,
+> troubleshooting): [`docs/SETUP.en.md`](docs/SETUP.en.md).
+
 ---
 
 ## Why it works the way it does
@@ -31,7 +34,8 @@ project uses a deliberate split that survived a lot of trial and error:
 - ⏱️ Periodic sync (default every 4h) + immediate run on container start.
 - 🎵 Original audio (no transcode), embedded metadata + cover art.
 - 📃 Ordered `.m3u` playlist, auto‑imported by Navidrome.
-- 🗂️ Single‑album grouping so the library stays clean.
+- 🗂️ Single‑album grouping + playlist‑order track numbers — the library stays
+  clean and the album opens in playlist order (newest first).
 - ➕ Add‑only: removing a track from the playlist never deletes the local file.
 - ♻️ Self‑healing: the playlist is rebuilt from the files actually on disk
   (track IDs are read back from the embedded `purl` tag).
