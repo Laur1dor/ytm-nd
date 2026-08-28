@@ -49,6 +49,10 @@ PLAYER_CLIENT = os.environ.get("YT_PLAYER_CLIENT", "android_vr").strip()
 YT_API_KEY = os.environ.get("YT_API_KEY", "").strip()
 REQUIRE_SHARE = truthy(os.environ.get("REQUIRE_SHARE", "true"))
 RCLONE_REMOTE = os.environ.get("RCLONE_REMOTE", "").strip()
+# Адрес PO-Token провайдера (bgutil). YouTube требует GVS PO Token для аудио-дорожек,
+# без него медиа-URL отдаёт HTTP 403. Пусто = выключено (тогда доступен только
+# запасной muxed-формат 18, 360p/AAC ~96k).
+POT_BASE_URL = os.environ.get("POT_BASE_URL", "").strip()
 
 DEST = MUSIC_ROOT / SUBDIR
 ARCHIVE = CONFIG / "archive.txt"
@@ -294,11 +298,17 @@ download_cmd = [
     "--extractor-args", f"youtube:player_client={PLAYER_CLIENT}",
     "-f", "bestaudio/best", "--extract-audio",
     "--embed-metadata", "--embed-thumbnail",
+    # длинные названия (особенно из 4-байтовых юникод-символов) не влезают в лимит
+    # имени файла на CIFS — без обрезки трек падает с "[Errno 36] File name too long"
+    "--trim-filenames", "80",
     "--sleep-requests", "1", "--sleep-interval", "2", "--max-sleep-interval", "6",
     "--retries", "5", "--fragment-retries", "10",
     "-o", out_template, "-a", str(BATCH),
 ]
-log(f"скачиваю (client={PLAYER_CLIENT}, без cookies, пропуск недоступных: {len(unavailable)})...")
+if POT_BASE_URL:
+    download_cmd += ["--extractor-args", f"youtubepot-bgutilhttp:base_url={POT_BASE_URL}"]
+log(f"скачиваю (client={PLAYER_CLIENT}, без cookies, "
+    f"pot={POT_BASE_URL or 'выкл'}, пропуск недоступных: {len(unavailable)})...")
 rc = subprocess.run(download_cmd).returncode
 log(f"yt-dlp скачивание завершено, rc={rc}")
 

@@ -4,12 +4,23 @@ services:
     image: ytm-sync:latest
     container_name: ytm-sync
     restart: unless-stopped
+    depends_on:
+      - bgutil-provider
+    # DNS: резолверы LXC (1.1.1.1, роутер) отдают NXDOMAIN на youtube.com —
+    # весь getaddrinfo падает и yt-dlp не видит YouTube. 8.8.8.8 отвечает корректно.
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     environment:
       PLAYLIST_URL: ${PLAYLIST_URL:?Set PLAYLIST_URL in .env}
       YT_API_KEY: ${YT_API_KEY:-}                    # ключ YouTube Data API (надёжнее cookies)
       INTERVAL_SECONDS: ${INTERVAL_SECONDS:-14400}   # каждые 4 часа
       MUSIC_SUBDIR: ${MUSIC_SUBDIR:-YouTube Music}
       MUSIC_ROOT: /music
+      # Клиент YouTube для скачивания. android_vr больше не работает: с 08.2026 YouTube
+      # требует GVS PO Token, а bgutil выдаёт токены только веб-семейству клиентов.
+      # tv_simply/mweb + POT_BASE_URL отдают opus 251. Список = порядок перебора.
+      YT_PLAYER_CLIENT: ${YT_PLAYER_CLIENT:-tv_simply,mweb}
       CONFIG_DIR: /config
       # один альбom в Navidrome (чтобы не плодились сотни одиночных альбомов)
       ALBUM_NAME: ${ALBUM_NAME:-YTM}
@@ -20,6 +31,9 @@ services:
       # опциональное зеркало в S3/удалённое хранилище (rclone remote, напр. "s3:bucket/music").
       # Пусто = выключено. Конфиг rclone клади в ./data/rclone.conf.
       RCLONE_REMOTE: ${RCLONE_REMOTE:-}
+      # PO-Token провайдер: YouTube требует GVS PO Token для аудио-дорожек (иначе 403).
+      # Пусто = выключено. Имя хоста = имя соседнего сервиса в этом compose.
+      POT_BASE_URL: ${POT_BASE_URL:-http://bgutil-provider:4416}
       TZ: ${TZ:-Europe/Moscow}
     volumes:
       # rslave: контейнер видит перемонтирование шары на хосте без ребута контейнера
@@ -31,3 +45,16 @@ services:
       - ./data:/config             # archive.txt, idmap.tsv, cookies.txt, replacements.tsv
       - ./sync.py:/sync.py:ro      # скрипт правится без пересборки образа
       - ./entrypoint.sh:/entrypoint.sh:ro
+
+  # Выдаёт yt-dlp GVS PO Token (крутит JS-челлендж YouTube в headless-движке).
+  # Наружу не публикуется — доступен только контейнерам этого compose.
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: bgutil-provider
+    restart: unless-stopped
+    # тот же DNS-обход: провайдер сам ходит на youtube.com за челленджем
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    environment:
+      TZ: ${TZ:-Europe/Moscow}

@@ -96,6 +96,8 @@ At minimum set `PLAYLIST_URL` and `YT_API_KEY`. All variables:
 | `MUSIC_HOST_PATH` | `/mnt/Music` | Host music path, mounted to `/music`. |
 | `REQUIRE_SHARE` | `true` | Guard: only write to a live network share. |
 | `RCLONE_REMOTE` | — | Optional S3/remote mirror. |
+| `YT_PLAYER_CLIENT` | `tv_simply,mweb` | YouTube clients used for downloading; comma-separated = fallback order. |
+| `POT_BASE_URL` | `http://bgutil-provider:4416` | PO Token provider address. Empty = disabled (only format 18 remains). |
 | `TZ` | `Europe/Moscow` | Timezone. |
 
 Get `PLAYLIST_URL`: in YouTube Music open the playlist → Share → Copy link. The
@@ -163,8 +165,9 @@ Each run (`sync.py`):
 
 1. **List.** Ordered video IDs via YouTube Data API (fallback: `yt-dlp
    --flat-playlist` + cookies). Order = playlist order.
-2. **Download.** `yt-dlp` with the `android_vr` client, **no cookies**, downloads
-   new tracks. `--download-archive` prevents re-downloads. Known-dead IDs
+2. **Download.** `yt-dlp` with the `tv_simply,mweb` clients, **no cookies**, downloads
+   new tracks, fetching a GVS PO Token from the sidecar `bgutil-provider` container.
+   `--download-archive` prevents re-downloads. Known-dead IDs
    (`data/unavailable.txt`) are skipped.
 3. **Reconcile.** For each file on disk the embedded `purl` tag (video link) is
    read → builds a `videoId → file` map. The playlist is rebuilt from what's
@@ -181,7 +184,8 @@ Each run (`sync.py`):
 | Choice | Reason |
 |---|---|
 | List via API, not cookies | anonymous caps at ~100; cookies expire within hours |
-| Download via `android_vr`, no cookies | direct audio URLs, no JS "n-signature"; cookies break web/tv clients ("Only images available") |
+| Download via `tv_simply,mweb` + PO Token | YouTube requires a GVS PO Token; without it media URLs return HTTP 403 and only format 18 (360p muxed, AAC ~96k) is left |
+| PO Token via a sidecar container | the token is computed by YouTube's JS engine; the provider only issues tokens for the web client family, so Android clients (including `android_vr`) cannot use it |
 | Age-restricted via `yt-dlp[default]` + `deno` + cookies | the `yt-dlp-ejs` package solves the JS challenge |
 | Single album + track numbers | otherwise hundreds of singles; numbers give playlist order in the album |
 | Network-share guard | never write to local disk if the share dropped |

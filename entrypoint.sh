@@ -6,7 +6,7 @@ INTERVAL="${INTERVAL_SECONDS:-14400}"   # по умолчанию каждые 4
 
 upgrade_ytdlp() {
   echo "[ytm-sync] обновляю yt-dlp..."
-  if pip install --no-cache-dir -U "yt-dlp[default]" >/tmp/pip.log 2>&1; then
+  if pip install --no-cache-dir -U "yt-dlp[default]" bgutil-ytdlp-pot-provider >/tmp/pip.log 2>&1; then
     tail -1 /tmp/pip.log
   else
     echo "[ytm-sync] обновление yt-dlp не удалось, использую установленную версию"

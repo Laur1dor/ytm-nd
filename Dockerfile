@@ -15,7 +15,9 @@ RUN curl -fsSL https://rclone.org/install.sh | bash || true
 # yt-dlp[default] тянет yt-dlp-ejs (решатель JS-челленджей YouTube, нужен с deno);
 # mutagen — встраивание обложек и проставление тегов альбома.
 # yt-dlp обновляется при каждом старте контейнера (entrypoint).
-RUN pip install --no-cache-dir -U "yt-dlp[default]" mutagen
+# bgutil-ytdlp-pot-provider — клиентский плагин к yt-dlp: ходит за GVS PO Token
+# в соседний контейнер-провайдер. Без токена YouTube отдаёт 403 на аудио-дорожки.
+RUN pip install --no-cache-dir -U "yt-dlp[default]" mutagen bgutil-ytdlp-pot-provider
 
 COPY entrypoint.sh /entrypoint.sh
 COPY sync.py /sync.py

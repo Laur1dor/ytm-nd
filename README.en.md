@@ -23,7 +23,8 @@ project uses a deliberate split that survived a lot of trial and error:
 | Concern | Approach | Reason |
 |---|---|---|
 | **Get the full track list** | **YouTube Data API v3** (API key) | Anonymous access caps big playlists at ~100 items. Cookies work but **expire within hours** when the account is used elsewhere. An API key never rotates. |
-| **Download audio** | `yt-dlp` with the `android_vr` client, **no cookies** | This client returns direct audio URLs without the JS "n-signature" challenge. With cookies, web/TV clients fail with *"Only images available"*. |
+| **Download audio** | `yt-dlp` with the `tv_simply,mweb` clients + a PO-Token provider | YouTube requires a **GVS PO Token**: without it media URLs return **HTTP 403** and the only remaining format is the fallback 18 (360p muxed, AAC ~96k). With the provider the same clients serve full opus 251. |
+| **PO Token** | A sidecar `bgutil-provider` container | The token is computed by YouTube's JS engine, which yt-dlp cannot do on its own. The provider only issues tokens for the **web client family** — so Android clients (including `android_vr`) cannot use it. |
 | **Age‑restricted tracks** | `yt-dlp[default]` (bundles `yt-dlp-ejs`) + `deno` + cookies | Solves the JS challenge so age‑gated videos resolve. |
 | **Library structure** | All tracks tagged `ALBUM=YTM`, `ALBUMARTIST=…` | Otherwise every single becomes its own album and floods Navidrome's *Albums* view. |
 | **Playlist order** | Generated `.m3u` rebuilt every run | Navidrome auto‑imports it as a playlist in the exact playlist order. |
@@ -112,8 +113,8 @@ All configuration is via `.env` (see [`.env.example`](.env.example)):
 ## How a sync run works
 
 1. Fetch the ordered list of video IDs (YouTube Data API, or yt‑dlp fallback).
-2. Download anything new with `yt-dlp` (`android_vr`, archive prevents re‑downloads),
-   skipping IDs known to be permanently unavailable.
+2. Download anything new with `yt-dlp` (`tv_simply,mweb` + PO Token, archive prevents
+   re‑downloads), skipping IDs known to be permanently unavailable.
 3. Apply the single‑album tags to any untagged files.
 4. Rebuild the `videoId → file` map from disk (read from embedded `purl` tags).
 5. Optionally mirror to a remote via `rclone`.
