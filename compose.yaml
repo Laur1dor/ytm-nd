@@ -6,8 +6,12 @@ services:
     restart: unless-stopped
     depends_on:
       - bgutil-provider
-    # Используем DNS хоста через встроенный резолвер Docker. Публичные
-    # 8.8.8.8/8.8.4.4 могут блокироваться или подменяться провайдером.
+      - dnsproxy
+    # Обычный DNS в сети может возвращать NXDOMAIN для youtube.com.
+    dns:
+      - 172.30.199.53
+    networks:
+      ytm_net:
     environment:
       PLAYLIST_URL: ${PLAYLIST_URL:?Set PLAYLIST_URL in .env}
       YT_API_KEY: ${YT_API_KEY:-}                    # ключ YouTube Data API (надёжнее cookies)
@@ -53,6 +57,24 @@ services:
     image: brainicism/bgutil-ytdlp-pot-provider:latest
     container_name: bgutil-provider
     restart: unless-stopped
-    # Тот же DNS хоста, что и у основного сервиса.
+    dns:
+      - 172.30.199.53
+    networks:
+      ytm_net:
     environment:
       TZ: ${TZ:-Europe/Moscow}
+
+  # Локальный DNS через HTTPS; наружу порт 53 не публикуется.
+  dnsproxy:
+    image: adguard/dnsproxy:v0.85.0
+    restart: unless-stopped
+    command: ["-l", "0.0.0.0", "-p", "53", "-u", "https://dns.google/dns-query", "-b", "8.8.8.8:53", "--cache"]
+    networks:
+      ytm_net:
+        ipv4_address: 172.30.199.53
+
+networks:
+  ytm_net:
+    ipam:
+      config:
+        - subnet: 172.30.199.0/24

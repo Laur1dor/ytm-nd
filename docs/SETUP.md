@@ -287,7 +287,7 @@ cp cookies.txt ./data/cookies.txt
 | В Navidrome два одинаковых плейлиста | дубликат от частых пересканов; удали лишний в БД/через UI |
 | `HTTP Error 403: Forbidden` на скачивании | нет GVS PO Token: проверь, что контейнер `bgutil-provider` поднят и `POT_BASE_URL` указывает на него, а `YT_PLAYER_CLIENT` — веб-клиент (`tv_simply`/`mweb`) |
 | Качается только 360p / звук ~96k | то же самое: без PO-Token YouTube отдаёт лишь запасной формат 18 |
-| `Failed to resolve 'www.youtube.com'` | Проверь `getent hosts www.youtube.com` на хосте и в обоих контейнерах. Сервисы используют DNS хоста через Docker; настрой рабочий DNS на хосте (например, через VPN), затем пересоздай контейнеры. Не указывай заблокированные публичные DNS в `compose.yaml`. |
+| `Failed to resolve 'www.youtube.com'` | Проверь `docker exec ytm-sync getent hosts www.youtube.com` и `docker logs ytm-sync-dnsproxy-1`. Контейнеры используют локальный DNS-прокси с HTTPS; хост LHS может при этом не разрешать YouTube. |
 | Новые треки не появляются | проверь логи (`docker compose logs`), что список приходит полный и идёт скачивание |
 
 ---
