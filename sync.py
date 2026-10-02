@@ -49,6 +49,7 @@ PLAYER_CLIENT = os.environ.get("YT_PLAYER_CLIENT", "android_vr").strip()
 YT_API_KEY = os.environ.get("YT_API_KEY", "").strip()
 REQUIRE_SHARE = truthy(os.environ.get("REQUIRE_SHARE", "true"))
 RCLONE_REMOTE = os.environ.get("RCLONE_REMOTE", "").strip()
+FAST_SYNC = truthy(os.environ.get("FAST_SYNC", "false"))
 # Адрес PO-Token провайдера (bgutil). YouTube требует GVS PO Token для аудио-дорожек,
 # без него медиа-URL отдаёт HTTP 403. Пусто = выключено (тогда доступен только
 # запасной muxed-формат 18, 360p/AAC ~96k).
@@ -288,7 +289,8 @@ if not ordered_ids:
 
 # 2) скачивание новых (минус заведомо недоступные)
 unavailable = load_set(UNAVAIL)
-to_get = [v for v in ordered_ids if v not in unavailable]
+known_files = load_tsv(IDMAP) if FAST_SYNC else {}
+to_get = [v for v in ordered_ids if v not in unavailable and v not in known_files]
 BATCH.write_text("".join(f"https://www.youtube.com/watch?v={v}\n" for v in to_get), encoding="utf-8")
 out_template = str(DEST / "%(artist,uploader)s - %(track,title)s.%(ext)s")
 download_cmd = [
@@ -307,7 +309,7 @@ download_cmd = [
 ]
 if POT_BASE_URL:
     download_cmd += ["--extractor-args", f"youtubepot-bgutilhttp:base_url={POT_BASE_URL}"]
-log(f"скачиваю (client={PLAYER_CLIENT}, без cookies, "
+log(f"скачиваю {len(to_get)} кандидатов (client={PLAYER_CLIENT}, без cookies, "
     f"pot={POT_BASE_URL or 'выкл'}, пропуск недоступных: {len(unavailable)})...")
 rc = subprocess.run(download_cmd).returncode
 log(f"yt-dlp скачивание завершено, rc={rc}")

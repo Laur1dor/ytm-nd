@@ -2,7 +2,8 @@
 # Запускает периодическую синхронизацию плейлиста YouTube Music в библиотеку Navidrome.
 set -uo pipefail
 
-INTERVAL="${INTERVAL_SECONDS:-14400}"   # по умолчанию каждые 4 часа
+INTERVAL="${INTERVAL_SECONDS:-3600}"   # полная сверка раз в час
+PROBE_INTERVAL="${LIKES_PROBE_SECONDS:-60}"
 
 upgrade_ytdlp() {
   echo "[ytm-sync] обновляю yt-dlp..."
@@ -50,6 +51,33 @@ while true; do
   fi
   python3 /sync.py || echo "[ytm-sync] sync завершился с ошибкой (продолжаю по расписанию)"
 
-  echo "[ytm-sync] $(date -Is) сплю ${INTERVAL}s до следующей проверки"
-  sleep "${INTERVAL}"
+  next_full=$(($(date +%s) + INTERVAL))
+  echo "[ytm-sync] $(date -Is) полная сверка через ${INTERVAL}s; проверка лайков каждые ${PROBE_INTERVAL}s"
+  while [ "$(date +%s)" -lt "$next_full" ]; do
+    sleep "$PROBE_INTERVAL"
+    [ "$(date +%s)" -ge "$next_full" ] && break
+    [ "${LIKES_TO_MAIN:-false}" = "true" ] || continue
+
+    if python3 /likes_to_main.py --probe; then
+      continue
+    else
+      probe_rc=$?
+    fi
+    if [ "$probe_rc" -ne 10 ]; then
+      echo "[ytm-sync] проверка лайков не удалась (код $probe_rc)"
+      continue
+    fi
+
+    if python3 /likes_to_main.py --signal-added; then
+      continue
+    else
+      transfer_rc=$?
+    fi
+    if [ "$transfer_rc" -eq 10 ]; then
+      wait_for_share
+      FAST_SYNC=true python3 /sync.py || echo "[ytm-sync] загрузка нового трека завершилась с ошибкой; повторю при полной сверке"
+    else
+      echo "[ytm-sync] перенос лайков не удался (код $transfer_rc); повторю на следующей проверке"
+    fi
+  done
 done

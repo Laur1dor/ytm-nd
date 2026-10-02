@@ -91,7 +91,8 @@ At minimum set `PLAYLIST_URL` and `YT_API_KEY`. All variables:
 | `YT_API_KEY` | — | Key from step 3. |
 | `LIKES_TO_MAIN` | `false` | Copy new likes to the top of the source playlist before downloading. |
 | `YTM_OAUTH_CLIENT_ID`, `YTM_OAUTH_CLIENT_SECRET` | — | OAuth client for the transfer; also requires `data/oauth.json`. |
-| `INTERVAL_SECONDS` | `14400` | Check period (s). 14400 = 4h. |
+| `INTERVAL_SECONDS` | `3600` | Full Main and NAS sync period (s). |
+| `LIKES_PROBE_SECONDS` | `60` | Lightweight new-like check period (s); a new like triggers a NAS download after insertion into Main. |
 | `MUSIC_SUBDIR` | `YTM` | Subfolder for downloads. |
 | `ALBUM_NAME` | `YTM` | Wrapper album name for all tracks. |
 | `ALBUM_ARTIST` | `YouTube Music` | Album-artist for all tracks. |

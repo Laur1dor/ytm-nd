@@ -157,6 +157,15 @@ def save_checkpoints(path, liked_ids):
     temporary.replace(path)
 
 
+def has_new_likes(client, checkpoint_file):
+    """One API request to decide whether a full sync is needed."""
+    checkpoints = load_checkpoints(checkpoint_file)
+    if checkpoints is None:
+        return True
+    latest = ids_from_tracks(client.get_liked_songs(limit=1))
+    return bool(latest and latest[0] not in checkpoints)
+
+
 def scan_new_likes(client, known_main_ids, checkpoints):
     """Read only the newest prefix, stopping at a previous liked track."""
     limit = 50
@@ -217,12 +226,19 @@ def sync(client, target_id, checkpoint_file, dry_run=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="оценить без изменений")
+    parser.add_argument("--probe", action="store_true", help="одним запросом проверить новые лайки")
+    parser.add_argument("--signal-added", action="store_true", help="код 10, если треки добавлены в Main")
     args = parser.parse_args()
     try:
-        target_id = playlist_id(os.environ["PLAYLIST_URL"])
         config = Path(os.environ.get("CONFIG_DIR", "/config"))
         client = YouTubeClient(config)
-        sync(client, target_id, config / "likes_checkpoint.json", args.dry_run)
+        checkpoint = config / "likes_checkpoint.json"
+        if args.probe:
+            return 10 if has_new_likes(client, checkpoint) else 0
+        target_id = playlist_id(os.environ["PLAYLIST_URL"])
+        added = sync(client, target_id, checkpoint, args.dry_run)
+        if args.signal_added and added and not args.dry_run:
+            return 10
     except Exception as exc:
         print(f"[likes-to-main] Ошибка: {exc}", file=sys.stderr, flush=True)
         return 1

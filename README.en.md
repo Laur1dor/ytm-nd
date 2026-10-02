@@ -38,7 +38,7 @@ project uses a deliberate split that survived a lot of trial and error:
 
 ## Features
 
-- ⏱️ Periodic sync (default every 4h) + immediate run on container start.
+- ⏱️ Check likes every minute, full sync every hour, and run on container start.
 - 🎵 Original audio (no transcode), embedded metadata + cover art.
 - 📃 Ordered `.m3u` playlist, auto‑imported by Navidrome.
 - 🗂️ Single‑album grouping + playlist‑order track numbers — the library stays
@@ -129,7 +129,8 @@ All configuration is via `.env` (see [`.env.example`](.env.example)):
 | `YT_API_KEY` | — | YouTube Data API v3 key (recommended). |
 | `LIKES_TO_MAIN` | `false` | Add new liked tracks to the top of the source playlist. |
 | `YTM_OAUTH_CLIENT_ID`, `YTM_OAUTH_CLIENT_SECRET` | — | OAuth client for playlist updates; also requires `data/oauth.json`. |
-| `INTERVAL_SECONDS` | `14400` | How often to check the playlist (4h). |
+| `INTERVAL_SECONDS` | `3600` | Full Main and NAS sync period (1h). |
+| `LIKES_PROBE_SECONDS` | `60` | Lightweight new-like check period. |
 | `MUSIC_SUBDIR` | `YTM` | Subfolder inside the music root for downloads. |
 | `ALBUM_NAME` | `YTM` | Album tag applied to every track (grouping). |
 | `ALBUM_ARTIST` | `YouTube Music` | Album‑artist tag applied to every track. |

@@ -18,7 +18,8 @@ services:
       LIKES_TO_MAIN: ${LIKES_TO_MAIN:-false}         # копировать новые лайки в Main перед скачиванием
       YTM_OAUTH_CLIENT_ID: ${YTM_OAUTH_CLIENT_ID:-}
       YTM_OAUTH_CLIENT_SECRET: ${YTM_OAUTH_CLIENT_SECRET:-}
-      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-14400}   # каждые 4 часа
+      INTERVAL_SECONDS: ${INTERVAL_SECONDS:-3600}    # полная сверка раз в час
+      LIKES_PROBE_SECONDS: ${LIKES_PROBE_SECONDS:-60} # короткая проверка лайков
       MUSIC_SUBDIR: ${MUSIC_SUBDIR:-YouTube Music}
       MUSIC_ROOT: /music
       # Клиент YouTube для скачивания. android_vr больше не работает: с 08.2026 YouTube

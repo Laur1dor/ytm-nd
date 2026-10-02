@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from likes_to_main import scan_new_likes, sync
+from likes_to_main import has_new_likes, scan_new_likes, sync
 
 
 class FakeYouTube:
@@ -40,6 +40,16 @@ E = "EEEEEEEEEEE"
 
 
 class LikesToMainTests(unittest.TestCase):
+    def test_probe_only_reads_latest_like_and_checkpoint(self):
+        client = FakeYouTube([A, B, C], [B, C])
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "checkpoint.json"
+            self.assertTrue(has_new_likes(client, checkpoint))
+            sync(client, "MainId", checkpoint)
+            self.assertFalse(has_new_likes(client, checkpoint))
+            client.liked.insert(0, D)
+            self.assertTrue(has_new_likes(client, checkpoint))
+
     def test_bootstrap_copies_only_prefix_and_preserves_newest_first(self):
         client = FakeYouTube([A, B, C, D], [C, D, E])
         with tempfile.TemporaryDirectory() as tmp:
