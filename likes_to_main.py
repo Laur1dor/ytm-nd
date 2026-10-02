@@ -76,6 +76,7 @@ class YouTubeClient:
         self.token["expires_at"] = int(time.time()) + fresh["expires_in"]
         temporary = self.token_file.with_suffix(".tmp")
         temporary.write_text(json.dumps(self.token) + "\n", encoding="utf-8")
+        os.chmod(temporary, 0o600)
         temporary.replace(self.token_file)
         return self.token["access_token"]
 
@@ -152,6 +153,7 @@ def save_checkpoints(path, liked_ids):
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps({"recent_liked_ids": liked_ids[:CHECKPOINT_COUNT]},
                                     ensure_ascii=False) + "\n", encoding="utf-8")
+    os.chmod(temporary, 0o600)
     temporary.replace(path)
 
 
