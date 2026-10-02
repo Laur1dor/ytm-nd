@@ -6,14 +6,14 @@ services:
     restart: unless-stopped
     depends_on:
       - bgutil-provider
-    # DNS: резолверы LXC (1.1.1.1, роутер) отдают NXDOMAIN на youtube.com —
-    # весь getaddrinfo падает и yt-dlp не видит YouTube. 8.8.8.8 отвечает корректно.
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
+    # Используем DNS хоста через встроенный резолвер Docker. Публичные
+    # 8.8.8.8/8.8.4.4 могут блокироваться или подменяться провайдером.
     environment:
       PLAYLIST_URL: ${PLAYLIST_URL:?Set PLAYLIST_URL in .env}
       YT_API_KEY: ${YT_API_KEY:-}                    # ключ YouTube Data API (надёжнее cookies)
+      LIKES_TO_MAIN: ${LIKES_TO_MAIN:-false}         # копировать новые лайки в Main перед скачиванием
+      YTM_OAUTH_CLIENT_ID: ${YTM_OAUTH_CLIENT_ID:-}
+      YTM_OAUTH_CLIENT_SECRET: ${YTM_OAUTH_CLIENT_SECRET:-}
       INTERVAL_SECONDS: ${INTERVAL_SECONDS:-14400}   # каждые 4 часа
       MUSIC_SUBDIR: ${MUSIC_SUBDIR:-YouTube Music}
       MUSIC_ROOT: /music
@@ -44,6 +44,7 @@ services:
           propagation: rslave
       - ./data:/config             # archive.txt, idmap.tsv, cookies.txt, replacements.tsv
       - ./sync.py:/sync.py:ro      # скрипт правится без пересборки образа
+      - ./likes_to_main.py:/likes_to_main.py:ro
       - ./entrypoint.sh:/entrypoint.sh:ro
 
   # Выдаёт yt-dlp GVS PO Token (крутит JS-челлендж YouTube в headless-движке).
@@ -52,9 +53,6 @@ services:
     image: brainicism/bgutil-ytdlp-pot-provider:latest
     container_name: bgutil-provider
     restart: unless-stopped
-    # тот же DNS-обход: провайдер сам ходит на youtube.com за челленджем
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
+    # Тот же DNS хоста, что и у основного сервиса.
     environment:
       TZ: ${TZ:-Europe/Moscow}

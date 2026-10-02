@@ -89,6 +89,8 @@ At minimum set `PLAYLIST_URL` and `YT_API_KEY`. All variables:
 |---|---|---|
 | `PLAYLIST_URL` | — | Public YTM playlist URL. |
 | `YT_API_KEY` | — | Key from step 3. |
+| `LIKES_TO_MAIN` | `false` | Copy new likes to the top of the source playlist before downloading. |
+| `YTM_OAUTH_CLIENT_ID`, `YTM_OAUTH_CLIENT_SECRET` | — | OAuth client for the transfer; also requires `data/oauth.json`. |
 | `INTERVAL_SECONDS` | `14400` | Check period (s). 14400 = 4h. |
 | `MUSIC_SUBDIR` | `YTM` | Subfolder for downloads. |
 | `ALBUM_NAME` | `YTM` | Wrapper album name for all tracks. |
@@ -102,6 +104,20 @@ At minimum set `PLAYLIST_URL` and `YT_API_KEY`. All variables:
 
 Get `PLAYLIST_URL`: in YouTube Music open the playlist → Share → Copy link. The
 playlist must be public (or unlisted/link).
+
+For `LIKES_TO_MAIN=true`, create an OAuth client of type **TVs and Limited Input
+devices** with the YouTube Data API v3 enabled. Publish the OAuth app as **In
+production** before authorization: **Testing** refresh tokens expire after seven
+days. Run `docker compose build ytm-sync` and
+`docker compose run --rm -w /config --entrypoint ytmusicapi ytm-sync oauth`,
+then confirm the Google device code. The token is saved as `data/oauth.json`.
+After setting the OAuth fields in `.env` (or `client_id` and `client_secret` in
+`data/oauth_client.json`), preview with
+`docker compose run --rm --entrypoint python3 ytm-sync /likes_to_main.py --dry-run`.
+The script reads music likes (`LM`) through the YouTube Data API up to a
+checkpoint, adds missing tracks at the top in order, and never removes tracks.
+Set Main sorting to **Newest first**. Its checkpoint is stored in
+`data/likes_checkpoint.json`.
 
 ---
 

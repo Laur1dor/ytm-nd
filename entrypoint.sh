@@ -6,7 +6,8 @@ INTERVAL="${INTERVAL_SECONDS:-14400}"   # по умолчанию каждые 4
 
 upgrade_ytdlp() {
   echo "[ytm-sync] обновляю yt-dlp..."
-  if pip install --no-cache-dir -U "yt-dlp[default]" bgutil-ytdlp-pot-provider >/tmp/pip.log 2>&1; then
+  if pip install --no-cache-dir --timeout 10 --retries 1 -U \
+      "yt-dlp[default]" bgutil-ytdlp-pot-provider >/tmp/pip.log 2>&1; then
     tail -1 /tmp/pip.log
   else
     echo "[ytm-sync] обновление yt-dlp не удалось, использую установленную версию"
@@ -44,6 +45,9 @@ while true; do
 
   wait_for_share
   echo "[ytm-sync] $(date -Is) === запуск синхронизации ==="
+  if [ "${LIKES_TO_MAIN:-false}" = "true" ]; then
+    python3 /likes_to_main.py || echo "[ytm-sync] перенос лайков не удался; продолжаю синхронизацию Main"
+  fi
   python3 /sync.py || echo "[ytm-sync] sync завершился с ошибкой (продолжаю по расписанию)"
 
   echo "[ytm-sync] $(date -Is) сплю ${INTERVAL}s до следующей проверки"

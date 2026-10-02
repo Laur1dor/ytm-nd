@@ -1,5 +1,7 @@
 # ytm-sync
 
+[Privacy policy](docs/privacy.md)
+
 [🇷🇺 Русский](README.md) · 🇬🇧 English
 
 Automatically mirror a **public YouTube Music playlist** into a **Navidrome** music
@@ -7,6 +9,10 @@ library. New tracks you add to the playlist are downloaded on a schedule (origin
 `opus`/`m4a`, with cover art and tags), grouped into a single album so they don't
 flood your library, and exposed to Navidrome both as files and as an ordered `.m3u`
 playlist.
+
+Optionally, new tracks from **Liked Songs** can be added to the top of that
+playlist before each download run. Liked Songs is read only; removing a like
+never removes the track from the playlist or NAS.
 
 Runs as a single Docker Compose service next to your Navidrome container.
 
@@ -66,6 +72,38 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+### Optional Liked Songs → playlist transfer
+
+Create a Google OAuth client of type **TVs and Limited Input devices** with the
+YouTube Data API v3 enabled. In [Google Cloud Credentials](https://console.cloud.google.com/apis/credentials),
+create the client, then generate `data/oauth.json` by confirming your Google
+account once:
+
+For ongoing operation, publish the OAuth app as **In production** before
+authorizing it. In **Testing**, Google expires refresh tokens after seven days.
+A personal-use app can remain unverified.
+
+```bash
+docker compose build ytm-sync
+docker compose run --rm -w /config --entrypoint ytmusicapi ytm-sync oauth
+```
+
+The command prints a verification link and code. Set `YTM_OAUTH_CLIENT_ID` and
+`YTM_OAUTH_CLIENT_SECRET` in `.env`, or save them as `client_id` and
+`client_secret` in `data/oauth_client.json`, then preview the transfer:
+
+```bash
+docker compose run --rm --entrypoint python3 ytm-sync /likes_to_main.py --dry-run
+```
+
+After checking the count, set `LIKES_TO_MAIN=true` and run `docker compose up -d`.
+The script reads music likes (`LM`) through the YouTube Data API until a previous
+checkpoint, copies newer tracks oldest first, and keeps checkpoints in
+`data/likes_checkpoint.json`. Set Main sorting to **Newest first** so each insert
+appears at the top. Tracks already added manually are not duplicated.
+If it cannot find a checkpoint, it stops without importing the whole history.
+The regular playlist download still runs. Files in `data/` are not published.
+
 ### Getting a YouTube Data API key (≈3 minutes, free)
 
 1. Open <https://console.cloud.google.com/> and create (or pick) a project.
@@ -89,6 +127,8 @@ All configuration is via `.env` (see [`.env.example`](.env.example)):
 |---|---|---|
 | `PLAYLIST_URL` | — | Public YouTube Music playlist URL (required). |
 | `YT_API_KEY` | — | YouTube Data API v3 key (recommended). |
+| `LIKES_TO_MAIN` | `false` | Add new liked tracks to the top of the source playlist. |
+| `YTM_OAUTH_CLIENT_ID`, `YTM_OAUTH_CLIENT_SECRET` | — | OAuth client for playlist updates; also requires `data/oauth.json`. |
 | `INTERVAL_SECONDS` | `14400` | How often to check the playlist (4h). |
 | `MUSIC_SUBDIR` | `YTM` | Subfolder inside the music root for downloads. |
 | `ALBUM_NAME` | `YTM` | Album tag applied to every track (grouping). |

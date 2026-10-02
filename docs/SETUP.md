@@ -97,6 +97,8 @@ nano .env
 |---|---|---|
 | `PLAYLIST_URL` | — | URL публичного плейлиста YTM (`https://music.youtube.com/playlist?list=...`). |
 | `YT_API_KEY` | — | Ключ из шага 3. |
+| `LIKES_TO_MAIN` | `false` | Переносить новые лайки в начало основного плейлиста перед скачиванием. |
+| `YTM_OAUTH_CLIENT_ID`, `YTM_OAUTH_CLIENT_SECRET` | — | OAuth-клиент для переноса; нужен `data/oauth.json`. |
 | `INTERVAL_SECONDS` | `14400` | Период проверки плейлиста (сек). 14400 = 4 часа. |
 | `MUSIC_SUBDIR` | `YTM` | Подпапка внутри музыкального корня для треков. |
 | `ALBUM_NAME` | `YTM` | Имя альбома-обёртки для всех треков. |
@@ -110,6 +112,20 @@ nano .env
 
 Как получить `PLAYLIST_URL`: в YouTube Music открой плейлист → «Поделиться» →
 «Копировать ссылку». Плейлист должен быть **публичным** (или «по ссылке»).
+
+Для `LIKES_TO_MAIN=true` сначала создай OAuth-клиент типа **TVs and Limited Input
+devices** с YouTube Data API v3. Переведи OAuth-приложение в **In production** до
+авторизации: в режиме **Testing** refresh token истекает через 7 дней. Затем
+выполни `docker compose build ytm-sync` и
+`docker compose run --rm -w /config --entrypoint ytmusicapi ytm-sync oauth`.
+Подтверди код в Google; файл появится как `data/oauth.json`. После заполнения
+OAuth-полей в `.env` (либо `client_id` и `client_secret` в
+`data/oauth_client.json`) проверь перенос командой
+`docker compose run --rm --entrypoint python3 ytm-sync /likes_to_main.py --dry-run`.
+Скрипт через YouTube Data API читает музыкальные лайки (`LM`) только до контрольной
+позиции, добавляет новые треки сверху в прежнем порядке и ничего не удаляет.
+Для этого сортировка `Main` должна быть **Сначала новые**. Контрольная позиция
+хранится в `data/likes_checkpoint.json`.
 
 ---
 
@@ -271,7 +287,7 @@ cp cookies.txt ./data/cookies.txt
 | В Navidrome два одинаковых плейлиста | дубликат от частых пересканов; удали лишний в БД/через UI |
 | `HTTP Error 403: Forbidden` на скачивании | нет GVS PO Token: проверь, что контейнер `bgutil-provider` поднят и `POT_BASE_URL` указывает на него, а `YT_PLAYER_CLIENT` — веб-клиент (`tv_simply`/`mweb`) |
 | Качается только 360p / звук ~96k | то же самое: без PO-Token YouTube отдаёт лишь запасной формат 18 |
-| `Failed to resolve 'www.youtube.com'` | DNS-фильтрация у провайдера: резолвер отдаёт NXDOMAIN на AAAA для youtube.com, и весь `getaddrinfo` падает. Пропиши сервису рабочий резолвер (`dns:` в compose) |
+| `Failed to resolve 'www.youtube.com'` | Проверь `getent hosts www.youtube.com` на хосте и в обоих контейнерах. Сервисы используют DNS хоста через Docker; настрой рабочий DNS на хосте (например, через VPN), затем пересоздай контейнеры. Не указывай заблокированные публичные DNS в `compose.yaml`. |
 | Новые треки не появляются | проверь логи (`docker compose logs`), что список приходит полный и идёт скачивание |
 
 ---

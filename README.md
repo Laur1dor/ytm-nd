@@ -1,5 +1,7 @@
 # ytm-sync
 
+[Политика конфиденциальности](docs/privacy.md)
+
 🇷🇺 Русский (основной) · [🇬🇧 English](README.en.md)
 
 Автоматическая синхронизация **публичного плейлиста YouTube Music** в медиатеку
@@ -7,6 +9,10 @@
 скачиваются (оригинальный `opus`/`m4a`, с обложкой и тегами), сводятся в один
 альбом, чтобы не засорять библиотеку, и отдаются в Navidrome и как файлы, и как
 упорядоченный `.m3u`-плейлист.
+
+Опционально сервис может перед каждым прогоном добавлять новые треки из
+**«Понравившейся музыки»** в начало этого плейлиста. Источник только читается;
+удаление лайка не удаляет трек из основного плейлиста или с NAS.
 
 Работает как один сервис Docker Compose рядом с контейнером Navidrome.
 
@@ -64,6 +70,38 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+### Автоперенос «Понравившиеся» → основной плейлист
+
+Нужен OAuth-клиент Google типа **TVs and Limited Input devices** с включённым
+YouTube Data API v3. Создай его в [Google Cloud Credentials](https://console.cloud.google.com/apis/credentials),
+затем получи `data/oauth.json` (одноразовое подтверждение Google-аккаунта):
+
+Для постоянной работы переведи OAuth-приложение в статус **In production** до
+авторизации: в статусе **Testing** Google завершает действие refresh token через
+7 дней. Для личного использования приложение может оставаться непроверенным.
+
+```bash
+docker compose build ytm-sync
+docker compose run --rm -w /config --entrypoint ytmusicapi ytm-sync oauth
+```
+
+Команда напечатает ссылку и код для подтверждения. Укажи OAuth client ID и secret
+в `.env` как `YTM_OAUTH_CLIENT_ID` и `YTM_OAUTH_CLIENT_SECRET` либо сохрани их в
+`data/oauth_client.json` как `client_id` и `client_secret`. До включения проверь
+границу переноса без изменений:
+
+```bash
+docker compose run --rm --entrypoint python3 ytm-sync /likes_to_main.py --dry-run
+```
+
+После проверки поставь `LIKES_TO_MAIN=true` и запусти `docker compose up -d`.
+Скрипт через YouTube Data API читает музыкальные лайки (`LM`) до последней
+контрольной позиции, добавляет новые треки от старого к свежему и хранит контрольную
+позицию в `data/likes_checkpoint.json`. Если позицию не удалось найти, перенос
+останавливается без массового импорта старой истории; обычная загрузка `Main`
+продолжится. Для сохранения порядка поставь в `Main` сортировку **Сначала новые**.
+Скрипт не дублирует треки, уже добавленные вручную. Файлы `data/` не публикуются в GitHub.
+
 ### Получить ключ YouTube Data API (≈3 минуты, бесплатно)
 
 1. Открой <https://console.cloud.google.com/> и создай (или выбери) проект.
@@ -87,6 +125,8 @@ docker compose logs -f
 |---|---|---|
 | `PLAYLIST_URL` | — | URL публичного плейлиста YouTube Music (обязательно). |
 | `YT_API_KEY` | — | Ключ YouTube Data API v3 (рекомендуется). |
+| `LIKES_TO_MAIN` | `false` | Включить добавление новых лайков в начало основного плейлиста. |
+| `YTM_OAUTH_CLIENT_ID`, `YTM_OAUTH_CLIENT_SECRET` | — | OAuth-клиент для записи в плейлист; дополнительно нужен `data/oauth.json`. |
 | `INTERVAL_SECONDS` | `14400` | Как часто проверять плейлист (4ч). |
 | `MUSIC_SUBDIR` | `YTM` | Подпапка внутри корня музыки для скачанного. |
 | `ALBUM_NAME` | `YTM` | Тег альбома для всех треков (группировка). |
