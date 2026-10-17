@@ -172,6 +172,7 @@ def tag_files(ordered_rels):
         return
     total = len(ordered_rels)
     changed = 0
+    failed = []
     for i, rel in enumerate(ordered_rels, start=1):
         p = MUSIC_ROOT / rel
         if not p.exists():
@@ -182,23 +183,35 @@ def tag_files(ordered_rels):
             if ext == ".opus":
                 a = OggOpus(p)
                 if (a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST
-                        and a.get("tracknumber", [""])[0] == num):
+                        and a.get("tracknumber", [""])[0] == num and a.get("discnumber") == ["1"]):
                     continue
-                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a.save()
+                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a["discnumber"] = ["1"]; a.save()
             elif ext in (".ogg", ".oga"):
                 a = OggVorbis(p)
                 if (a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST
-                        and a.get("tracknumber", [""])[0] == num):
+                        and a.get("tracknumber", [""])[0] == num and a.get("discnumber") == ["1"]):
                     continue
-                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a.save()
+                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a["discnumber"] = ["1"]; a.save()
             elif ext in (".m4a", ".aac"):
                 a = MP4(p)
+                # Navidrome includes release date in its album identity. yt-dlp
+                # writes it as ©day in MP4, splitting YTM into separate years.
+                # Keep the source date in a custom tag, outside album grouping.
+                cleaned = False
+                if "\xa9day" in a:
+                    source_date = "----:com.apple.iTunes:YTM_SOURCE_DATE"
+                    if source_date not in a:
+                        a[source_date] = [value.encode("utf-8") for value in a["\xa9day"]]
+                    del a["\xa9day"]
+                    cleaned = True
                 t = a.tags or {}
                 cur = t.get("trkn", [(0, 0)])[0][0]
                 if (t.get("\xa9alb", [""])[:1] == [ALBUM_NAME] and t.get("aART", [""])[:1] == [ALBUM_ARTIST]
-                        and cur == i):
+                        and cur == i and t.get("disk") == [(1, 1)] and not cleaned):
                     continue
-                a["\xa9alb"] = [ALBUM_NAME]; a["aART"] = [ALBUM_ARTIST]; a["trkn"] = [(i, total)]; a.save()
+                a["\xa9alb"] = [ALBUM_NAME]; a["aART"] = [ALBUM_ARTIST]; a["trkn"] = [(i, total)]
+                a["disk"] = [(1, 1)]
+                a.save()
             elif ext == ".mp3":
                 try:
                     a = EasyID3(p)
@@ -206,22 +219,25 @@ def tag_files(ordered_rels):
                     from mutagen.mp3 import MP3
                     mp3 = MP3(p); mp3.add_tags(); mp3.save(); a = EasyID3(p)
                 if (a.get("album", [""])[:1] == [ALBUM_NAME] and a.get("albumartist", [""])[:1] == [ALBUM_ARTIST]
-                        and a.get("tracknumber", [""])[:1] == [num]):
+                        and a.get("tracknumber", [""])[:1] == [num] and a.get("discnumber") == ["1"]):
                     continue
-                a["album"] = ALBUM_NAME; a["albumartist"] = ALBUM_ARTIST; a["tracknumber"] = num; a.save()
+                a["album"] = ALBUM_NAME; a["albumartist"] = ALBUM_ARTIST; a["tracknumber"] = num; a["discnumber"] = "1"; a.save()
             elif ext == ".flac":
                 a = FLAC(p)
                 if (a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST
-                        and a.get("tracknumber", [""])[0] == num):
+                        and a.get("tracknumber", [""])[0] == num and a.get("discnumber") == ["1"]):
                     continue
-                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a.save()
+                a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a["discnumber"] = ["1"]; a.save()
             else:
                 continue
             changed += 1
         except Exception as e:
             log(f"не удалось проставить теги {p.name}: {e}")
+            failed.append(rel)
     if changed:
         log(f"обновлены теги (альбом + номер по порядку плейлиста): {changed}")
+    if failed:
+        raise RuntimeError(f"Не удалось привести к альбому {ALBUM_NAME}: {len(failed)} файлов")
 
 
 # --------------------------------------------------------------------------- #

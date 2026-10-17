@@ -271,6 +271,7 @@ cp cookies.txt ./data/cookies.txt
 | Run aborts immediately, nothing downloads | `REQUIRE_SHARE=true` but share not mounted; check host mount and `.ytm_share_ok` |
 | Age-restricted track won't download | need fresh `data/cookies.txt`, then `backfill.py <id>` |
 | Album sorted alphabetically, not by playlist | old files lack track numbers; wait for a run or `docker compose restart` |
+| YTM split into separate albums by year | M4A release date `©day` is moved to `YTM_SOURCE_DATE`, outside Navidrome album grouping. Every file uses disc 1 and its playlist track number. Scan Navidrome after retagging. |
 | Two identical playlists in Navidrome | duplicate from frequent rescans; delete the extra in DB/UI |
 | New tracks don't appear | check logs that the full list arrives and downloading happens |
 
