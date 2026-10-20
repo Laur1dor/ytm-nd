@@ -16,6 +16,7 @@ services:
       PLAYLIST_URL: ${PLAYLIST_URL:?Set PLAYLIST_URL in .env}
       YT_API_KEY: ${YT_API_KEY:-}                    # ключ YouTube Data API (надёжнее cookies)
       LIKES_TO_MAIN: ${LIKES_TO_MAIN:-false}         # копировать новые лайки в Main перед скачиванием
+      YOUTUBE_LIKES_TO_MAIN: ${YOUTUBE_LIKES_TO_MAIN:-false} # музыкальные лайки из общего YouTube (TV)
       YTM_OAUTH_CLIENT_ID: ${YTM_OAUTH_CLIENT_ID:-}
       YTM_OAUTH_CLIENT_SECRET: ${YTM_OAUTH_CLIENT_SECRET:-}
       INTERVAL_SECONDS: ${INTERVAL_SECONDS:-3600}    # полная сверка раз в час

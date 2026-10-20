@@ -127,6 +127,7 @@ docker compose run --rm --entrypoint python3 ytm-sync /likes_to_main.py --dry-ru
 | `PLAYLIST_URL` | — | URL публичного плейлиста YouTube Music (обязательно). |
 | `YT_API_KEY` | — | Ключ YouTube Data API v3 (рекомендуется). |
 | `LIKES_TO_MAIN` | `false` | Включить добавление новых лайков в начало основного плейлиста. |
+| `YOUTUBE_LIKES_TO_MAIN` | `false` | Дополнительно проверять общий список лайков YouTube, например с TV; переносить только распознанную YouTube Music музыку. Требует `LIKES_TO_MAIN=true`. |
 | `YTM_OAUTH_CLIENT_ID`, `YTM_OAUTH_CLIENT_SECRET` | — | OAuth-клиент для записи в плейлист; дополнительно нужен `data/oauth.json`. |
 | `INTERVAL_SECONDS` | `3600` | Период полной сверки Main и NAS (1ч). |
 | `LIKES_PROBE_SECONDS` | `60` | Период короткой проверки новых лайков. |

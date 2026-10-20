@@ -128,6 +128,7 @@ All configuration is via `.env` (see [`.env.example`](.env.example)):
 | `PLAYLIST_URL` | — | Public YouTube Music playlist URL (required). |
 | `YT_API_KEY` | — | YouTube Data API v3 key (recommended). |
 | `LIKES_TO_MAIN` | `false` | Add new liked tracks to the top of the source playlist. |
+| `YOUTUBE_LIKES_TO_MAIN` | `false` | Also check general YouTube likes, including TV; copy only entries recognized as music by YouTube Music. Requires `LIKES_TO_MAIN=true`. |
 | `YTM_OAUTH_CLIENT_ID`, `YTM_OAUTH_CLIENT_SECRET` | — | OAuth client for playlist updates; also requires `data/oauth.json`. |
 | `INTERVAL_SECONDS` | `3600` | Full Main and NAS sync period (1h). |
 | `LIKES_PROBE_SECONDS` | `60` | Lightweight new-like check period. |

@@ -128,6 +128,23 @@ class YouTubeClient:
         # LM is music likes; LL also includes regular YouTube likes.
         return self._playlist_items("LM", limit)
 
+    def get_youtube_liked_songs(self, limit=50):
+        return self._playlist_items("LL", limit)
+
+    def is_music_video(self, video_id):
+        # YouTube categories are not reliable: ordinary videos can be marked
+        # Music, while actual songs may use Entertainment. Ask YT Music itself.
+        from ytmusicapi import YTMusic
+        if not hasattr(self, "music_client"):
+            self.music_client = YTMusic()
+        details = self.music_client.get_song(video_id).get("videoDetails")
+        if not isinstance(details, dict) or not details.get("videoId"):
+            raise RuntimeError(f"YouTube Music не вернул тип записи {video_id}; повторим позже")
+        # Keep the originally liked ID and version, even if YT Music maps it
+        # to a different official recording in its metadata response.
+        return details.get("musicVideoType") in {
+            "MUSIC_VIDEO_TYPE_ATV", "MUSIC_VIDEO_TYPE_OMV", "MUSIC_VIDEO_TYPE_UGC"}
+
     def insert_playlist_item(self, target_id, video_id):
         body = {"snippet": {"playlistId": target_id,
                             "resourceId": {"kind": "youtube#video", "videoId": video_id}}}
@@ -157,20 +174,22 @@ def save_checkpoints(path, liked_ids):
     temporary.replace(path)
 
 
-def has_new_likes(client, checkpoint_file):
+def has_new_likes(client, checkpoint_file, youtube=False):
     """One API request to decide whether a full sync is needed."""
     checkpoints = load_checkpoints(checkpoint_file)
     if checkpoints is None:
         return True
-    latest = ids_from_tracks(client.get_liked_songs(limit=1))
+    getter = client.get_youtube_liked_songs if youtube else client.get_liked_songs
+    latest = ids_from_tracks(getter(limit=1))
     return bool(latest and latest[0] not in checkpoints)
 
 
-def scan_new_likes(client, known_main_ids, checkpoints):
+def scan_new_likes(client, known_main_ids, checkpoints, youtube=False):
     """Read only the newest prefix, stopping at a previous liked track."""
     limit = 50
     while True:
-        liked = client.get_liked_songs(limit=limit)
+        getter = client.get_youtube_liked_songs if youtube else client.get_liked_songs
+        liked = getter(limit=limit)
         ids = ids_from_tracks(liked)
         anchors = checkpoints if checkpoints is not None else known_main_ids
         anchor = next((i for i, vid in enumerate(ids) if vid in anchors), None)
@@ -182,17 +201,27 @@ def scan_new_likes(client, known_main_ids, checkpoints):
         limit = min(limit * 2, MAX_SCAN)
 
 
-def sync(client, target_id, checkpoint_file, dry_run=False):
+def sync(client, target_id, checkpoint_file, dry_run=False, youtube=False):
+    checkpoints = load_checkpoints(checkpoint_file)
+    if youtube and checkpoints is None:
+        # Enabling the additional source must not import years of video likes.
+        latest = ids_from_tracks(client.get_youtube_liked_songs(limit=50))
+        if latest and not dry_run:
+            save_checkpoints(checkpoint_file, latest)
+        print("YouTube likes: начальная позиция; история не переносится", flush=True)
+        return []
     if not client.owns_playlist(target_id):
         raise RuntimeError("Авторизованный аккаунт не владеет плейлистом Main")
     current = track_entries(client.get_playlist(target_id))
     known_main_ids = {item["videoId"] for item in current}
-    checkpoints = load_checkpoints(checkpoint_file)
-    liked_ids, anchor = scan_new_likes(client, known_main_ids, checkpoints)
+    liked_ids, anchor = scan_new_likes(client, known_main_ids, checkpoints, youtube)
     # Если трек уже был добавлен в Main вручную, не дублируем его. Сохраняем
     # порядок остальных лайков перед найденной контрольной позицией.
     prefix = list(dict.fromkeys(liked_ids[:anchor]))
     missing = [vid for vid in prefix if vid not in known_main_ids]
+    if youtube:
+        missing = [vid for vid in missing if client.is_music_video(vid)]
+        print(f"YouTube likes: новых записей {anchor}; новых музыкальных {len(missing)}", flush=True)
     print(f"Main: {len(known_main_ids)}; новых лайков до контрольной позиции: "
           f"{anchor}; к добавлению: {len(missing)}", flush=True)
     if dry_run:
@@ -226,21 +255,40 @@ def sync(client, target_id, checkpoint_file, dry_run=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="оценить без изменений")
-    parser.add_argument("--probe", action="store_true", help="одним запросом проверить новые лайки")
+    parser.add_argument("--probe", action="store_true", help="проверить верхнюю запись источников лайков")
     parser.add_argument("--signal-added", action="store_true", help="код 10, если треки добавлены в Main")
     args = parser.parse_args()
+    added = []
     try:
         config = Path(os.environ.get("CONFIG_DIR", "/config"))
         client = YouTubeClient(config)
         checkpoint = config / "likes_checkpoint.json"
+        youtube_checkpoint = config / "youtube_likes_checkpoint.json"
+        youtube_enabled = os.environ.get("YOUTUBE_LIKES_TO_MAIN", "false").lower() == "true"
         if args.probe:
-            return 10 if has_new_likes(client, checkpoint) else 0
+            changed = has_new_likes(client, checkpoint)
+            if youtube_enabled and not changed:
+                changed = has_new_likes(client, youtube_checkpoint, youtube=True)
+            return 10 if changed else 0
         target_id = playlist_id(os.environ["PLAYLIST_URL"])
-        added = sync(client, target_id, checkpoint, args.dry_run)
+        youtube_failed = False
+        if youtube_enabled:
+            try:
+                # LL includes music likes too. Handle its chronological prefix
+                # first, so a mixed batch is inserted in the original order.
+                added += sync(client, target_id, youtube_checkpoint, args.dry_run, youtube=True)
+            except Exception as exc:
+                print(f"[likes-to-main] Проверка YouTube likes не удалась: {exc}", file=sys.stderr, flush=True)
+                youtube_failed = True
+        added += sync(client, target_id, checkpoint, args.dry_run)
         if args.signal_added and added and not args.dry_run:
             return 10
+        if youtube_failed:
+            return 1
     except Exception as exc:
         print(f"[likes-to-main] Ошибка: {exc}", file=sys.stderr, flush=True)
+        if args.signal_added and added and not args.dry_run:
+            return 10
         return 1
     return 0
 

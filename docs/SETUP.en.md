@@ -90,6 +90,7 @@ At minimum set `PLAYLIST_URL` and `YT_API_KEY`. All variables:
 | `PLAYLIST_URL` | — | Public YTM playlist URL. |
 | `YT_API_KEY` | — | Key from step 3. |
 | `LIKES_TO_MAIN` | `false` | Copy new likes to the top of the source playlist before downloading. |
+| `YOUTUBE_LIKES_TO_MAIN` | `false` | Also read music likes from general YouTube; uses a separate checkpoint and does not import old history on first enable. |
 | `YTM_OAUTH_CLIENT_ID`, `YTM_OAUTH_CLIENT_SECRET` | — | OAuth client for the transfer; also requires `data/oauth.json`. |
 | `INTERVAL_SECONDS` | `3600` | Full Main and NAS sync period (s). |
 | `LIKES_PROBE_SECONDS` | `60` | Lightweight new-like check period (s); a new like triggers a NAS download after insertion into Main. |
@@ -119,6 +120,14 @@ The script reads music likes (`LM`) through the YouTube Data API up to a
 checkpoint, adds missing tracks at the top in order, and never removes tracks.
 Set Main sorting to **Newest first**. Its checkpoint is stored in
 `data/likes_checkpoint.json`.
+
+If TV music likes appear in general YouTube but not in `LM`, enable
+`YOUTUBE_LIKES_TO_MAIN=true`. The additional `LL` source uses
+`data/youtube_likes_checkpoint.json`. Music eligibility is checked through
+YouTube Music player metadata (`ytmusicapi`), preserving the originally liked
+video ID. First enable records the current position without importing history.
+Idle polling uses up to two API calls per minute; music classification runs only
+for new entries. Source likes are never modified.
 
 ---
 

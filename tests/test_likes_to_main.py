@@ -1,16 +1,20 @@
 import tempfile
 import unittest
+import os
+from unittest.mock import patch
 from pathlib import Path
 
-from likes_to_main import has_new_likes, scan_new_likes, sync
+from likes_to_main import has_new_likes, scan_new_likes, sync, main, save_checkpoints, load_checkpoints
 
 
 class FakeYouTube:
-    def __init__(self, liked, main, fail_on=None):
+    def __init__(self, liked, main, fail_on=None, youtube_liked=None, music_ids=None):
         self.liked = liked
         self.main = main
         self.fail_on = fail_on
         self.added = []
+        self.youtube_liked = liked if youtube_liked is None else youtube_liked
+        self.music_ids = set(liked if music_ids is None else music_ids)
 
     def owns_playlist(self, playlist_id):
         return playlist_id == "MainId"
@@ -22,6 +26,12 @@ class FakeYouTube:
 
     def get_liked_songs(self, limit=100):
         return {"tracks": [{"videoId": vid} for vid in self.liked[:limit]]}
+
+    def get_youtube_liked_songs(self, limit=100):
+        return {"tracks": [{"videoId": vid} for vid in self.youtube_liked[:limit]]}
+
+    def is_music_video(self, vid):
+        return vid in self.music_ids
 
     def insert_playlist_item(self, playlist_id, vid):
         assert playlist_id == "MainId"
@@ -40,6 +50,61 @@ E = "EEEEEEEEEEE"
 
 
 class LikesToMainTests(unittest.TestCase):
+    def test_youtube_source_starts_now_without_importing_old_video_likes(self):
+        client = FakeYouTube([C], [C], youtube_liked=[A, B, C], music_ids={A, B, C})
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "youtube.json"
+            self.assertEqual(sync(client, "MainId", checkpoint, youtube=True, dry_run=True), [])
+            self.assertFalse(checkpoint.exists())
+            self.assertEqual(sync(client, "MainId", checkpoint, youtube=True), [])
+            self.assertFalse(has_new_likes(client, checkpoint, youtube=True))
+            self.assertEqual(client.main, [C])
+
+    def test_youtube_music_filter_remembers_skipped_videos_and_preserves_order(self):
+        client = FakeYouTube([C], [C], youtube_liked=[A, B, D, C], music_ids={A, D})
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "youtube.json"
+            save_checkpoints(checkpoint, [C])
+            self.assertTrue(has_new_likes(client, checkpoint, youtube=True))
+            self.assertEqual(sync(client, "MainId", checkpoint, youtube=True), [A, D])
+            self.assertEqual(client.main, [A, D, C])
+            self.assertEqual(client.added, [D, A])
+            self.assertIn(B, load_checkpoints(checkpoint))
+            self.assertFalse(has_new_likes(client, checkpoint, youtube=True))
+            self.assertEqual(sync(client, "MainId", checkpoint, youtube=True), [])
+
+    def test_music_classification_failure_keeps_youtube_checkpoint_for_retry(self):
+        client = FakeYouTube([C], [C], youtube_liked=[A, C])
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "youtube.json"
+            save_checkpoints(checkpoint, [C])
+            with patch.object(client, "is_music_video", side_effect=RuntimeError("network")):
+                with self.assertRaises(RuntimeError):
+                    sync(client, "MainId", checkpoint, youtube=True)
+            self.assertEqual(load_checkpoints(checkpoint), {C})
+            self.assertEqual(client.added, [])
+
+    def test_cli_merges_sources_without_duplicates_in_like_order(self):
+        client = FakeYouTube([A, C], [C], youtube_liked=[A, B, C], music_ids={A, B, C})
+        with tempfile.TemporaryDirectory() as tmp:
+            save_checkpoints(Path(tmp) / "youtube_likes_checkpoint.json", [C])
+            save_checkpoints(Path(tmp) / "likes_checkpoint.json", [C])
+            env = {"CONFIG_DIR": tmp, "PLAYLIST_URL": "https://music.youtube.com/playlist?list=MainId",
+                   "YOUTUBE_LIKES_TO_MAIN": "true"}
+            with patch.dict(os.environ, env), patch("likes_to_main.YouTubeClient", return_value=client), patch("sys.argv", ["likes_to_main.py", "--signal-added"]):
+                self.assertEqual(main(), 10)
+            self.assertEqual(client.main, [A, B, C])
+            self.assertEqual(client.added, [B, A])
+
+    def test_secondary_source_failure_does_not_block_music_likes(self):
+        client = FakeYouTube([A, C], [C])
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"CONFIG_DIR": tmp, "PLAYLIST_URL": "https://music.youtube.com/playlist?list=MainId",
+                   "YOUTUBE_LIKES_TO_MAIN": "true"}
+            with patch.dict(os.environ, env), patch("likes_to_main.YouTubeClient", return_value=client), patch.object(client, "get_youtube_liked_songs", side_effect=RuntimeError("network")), patch("sys.argv", ["likes_to_main.py", "--signal-added"]):
+                self.assertEqual(main(), 10)
+            self.assertEqual(client.main, [A, C])
+
     def test_probe_only_reads_latest_like_and_checkpoint(self):
         client = FakeYouTube([A, B, C], [B, C])
         with tempfile.TemporaryDirectory() as tmp:
