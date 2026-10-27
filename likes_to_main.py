@@ -7,6 +7,8 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -18,6 +20,15 @@ CHECKPOINT_COUNT = 50
 MAX_SCAN = 5000
 API_ROOT = "https://www.googleapis.com/youtube/v3/"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+
+class QuotaExceeded(RuntimeError):
+    pass
+
+
+def next_quota_reset():
+    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    return (now + timedelta(days=1)).replace(hour=0, minute=2, second=0, microsecond=0).timestamp()
 
 
 def playlist_id(url):
@@ -44,6 +55,7 @@ class YouTubeClient:
     """Adapter around the official YouTube Data API and device OAuth token."""
 
     def __init__(self, config_dir):
+        self.quota_file = config_dir / "youtube_quota.json"
         self.token_file = config_dir / "oauth.json"
         if not self.token_file.is_file():
             raise FileNotFoundError(f"Нет OAuth-файла {self.token_file}")
@@ -81,6 +93,11 @@ class YouTubeClient:
         return self.token["access_token"]
 
     def _request(self, method, resource, params=None, body=None):
+        if self.quota_file.exists():
+            resume_at = json.loads(self.quota_file.read_text())["resume_at"]
+            if time.time() < resume_at:
+                raise QuotaExceeded("Квота YouTube исчерпана; автоматический повтор после "
+                                    + datetime.fromtimestamp(resume_at).isoformat(timespec="minutes"))
         for attempt in range(2):
             response = self.session.request(
                 method, API_ROOT + resource, params=params, json=body,
@@ -91,6 +108,14 @@ class YouTubeClient:
                 continue
             if not response.ok:
                 error = response.json().get("error", {})
+                if any(item.get("reason") in {"quotaExceeded", "dailyLimitExceeded"}
+                       for item in error.get("errors", [])):
+                    temporary = self.quota_file.with_suffix(".tmp")
+                    temporary.write_text(json.dumps({"resume_at": next_quota_reset()}) + "\n")
+                    os.chmod(temporary, 0o600)
+                    temporary.replace(self.quota_file)
+                    raise QuotaExceeded("Квота YouTube исчерпана; позиция лайков сохранена, "
+                                        "перенос продолжится после сброса квоты")
                 raise RuntimeError(f"YouTube API {resource}: HTTP {response.status_code}; "
                                    f"{error.get('message', 'ошибка запроса')}")
             return response.json()
@@ -106,20 +131,33 @@ class YouTubeClient:
     def _playlist_items(self, playlist_id, limit=None):
         tracks = []
         page_token = None
+        seen_tokens = set()
+        scanned = 0
         while limit is None or len(tracks) < limit:
             params = {"part": "contentDetails", "playlistId": playlist_id,
-                      "maxResults": min(50, (limit - len(tracks)) if limit else 50)}
+                      "maxResults": min(50, (limit - scanned)) if limit else 50}
             if page_token:
                 params["pageToken"] = page_token
             page = self._request("GET", "playlistItems", params)
-            for item in page.get("items", []):
+            items = page.get("items", [])
+            scanned += len(items)
+            for item in items:
                 video_id = item.get("contentDetails", {}).get("videoId")
                 if video_id and VIDEO_ID.fullmatch(video_id):
                     tracks.append({"videoId": video_id})
             page_token = page.get("nextPageToken")
             if not page_token:
                 break
-        return {"tracks": tracks[:limit] if limit is not None else tracks}
+            if not items or page_token in seen_tokens or len(seen_tokens) >= 199:
+                raise RuntimeError("YouTube вернул пустую/повторяющуюся страницу или слишком большой список; "
+                                   "чтение остановлено для защиты квоты")
+            seen_tokens.add(page_token)
+            # Count raw playlist slots: deleted/private entries may have no videoId.
+            # Never walk the entire liked history just to fill one valid result.
+            if limit is not None and scanned >= limit:
+                break
+        return {"tracks": tracks[:limit] if limit is not None else tracks,
+                "hasMore": bool(page_token)}
 
     def get_playlist(self, target_id, limit=None):
         return self._playlist_items(target_id, limit)
@@ -175,12 +213,12 @@ def save_checkpoints(path, liked_ids):
 
 
 def has_new_likes(client, checkpoint_file, youtube=False):
-    """One API request to decide whether a full sync is needed."""
+    """Read at most 50 raw slots, even if some liked videos are unavailable."""
     checkpoints = load_checkpoints(checkpoint_file)
     if checkpoints is None:
         return True
     getter = client.get_youtube_liked_songs if youtube else client.get_liked_songs
-    latest = ids_from_tracks(getter(limit=1))
+    latest = ids_from_tracks(getter(limit=50))
     return bool(latest and latest[0] not in checkpoints)
 
 
@@ -195,7 +233,7 @@ def scan_new_likes(client, known_main_ids, checkpoints, youtube=False):
         anchor = next((i for i, vid in enumerate(ids) if vid in anchors), None)
         if anchor is not None:
             return ids, anchor
-        if len(ids) < limit or limit >= MAX_SCAN:
+        if not liked.get("hasMore", len(ids) >= limit) or limit >= MAX_SCAN:
             raise RuntimeError("Не найдена контрольная позиция в «Понравившихся»; "
                                "перенос остановлен, чтобы не копировать всю историю")
         limit = min(limit * 2, MAX_SCAN)
@@ -210,11 +248,19 @@ def sync(client, target_id, checkpoint_file, dry_run=False, youtube=False):
             save_checkpoints(checkpoint_file, latest)
         print("YouTube likes: начальная позиция; история не переносится", flush=True)
         return []
+    scanned_likes = None
+    if checkpoints is not None:
+        scanned_likes = scan_new_likes(client, set(), checkpoints, youtube)
+        if scanned_likes[1] == 0:
+            if not dry_run:
+                save_checkpoints(checkpoint_file, scanned_likes[0])
+            print("Новых лайков нет", flush=True)
+            return []
     if not client.owns_playlist(target_id):
         raise RuntimeError("Авторизованный аккаунт не владеет плейлистом Main")
     current = track_entries(client.get_playlist(target_id))
     known_main_ids = {item["videoId"] for item in current}
-    liked_ids, anchor = scan_new_likes(client, known_main_ids, checkpoints, youtube)
+    liked_ids, anchor = scanned_likes or scan_new_likes(client, known_main_ids, checkpoints, youtube)
     # Если трек уже был добавлен в Main вручную, не дублируем его. Сохраняем
     # порядок остальных лайков перед найденной контрольной позицией.
     prefix = list(dict.fromkeys(liked_ids[:anchor]))
@@ -280,6 +326,8 @@ def main():
             except Exception as exc:
                 print(f"[likes-to-main] Проверка YouTube likes не удалась: {exc}", file=sys.stderr, flush=True)
                 youtube_failed = True
+                if isinstance(exc, QuotaExceeded):
+                    raise
         added += sync(client, target_id, checkpoint, args.dry_run)
         if args.signal_added and added and not args.dry_run:
             return 10
