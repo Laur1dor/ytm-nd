@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy only new liked tracks to the top of Main; never change Liked Songs."""
+"""Copy new likes to Main; optionally promote only new YouTube music likes to Music."""
 
 import argparse
 import json
@@ -206,22 +206,29 @@ def load_checkpoints(path):
 
 
 def save_checkpoints(path, liked_ids):
+    save_json(path, {"recent_liked_ids": liked_ids[:CHECKPOINT_COUNT]})
+
+
+def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps({"recent_liked_ids": liked_ids[:CHECKPOINT_COUNT]},
-                                    ensure_ascii=False) + "\n", encoding="utf-8")
+    temporary.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
     os.chmod(temporary, 0o600)
     temporary.replace(path)
 
 
-def has_new_likes(client, checkpoint_file, youtube=False):
+def has_new_likes(client, checkpoint_file, youtube=False, latest_ids=None):
     """Read at most 50 raw slots, even if some liked videos are unavailable."""
     checkpoints = load_checkpoints(checkpoint_file)
     if checkpoints is None:
         return True
     getter = client.get_youtube_liked_songs if youtube else client.get_liked_songs
-    latest = ids_from_tracks(getter(limit=50))
-    return bool(latest and latest[0] not in checkpoints)
+    latest = ids_from_tracks(getter(limit=50)) if latest_ids is None else latest_ids
+    anchors = [i for i, vid in enumerate(latest) if vid in checkpoints]
+    # Reliking in Music can move our own known IDs above a concurrent new like.
+    # Ignore unseen old history below the oldest still-visible checkpoint.
+    boundary = max(anchors) if anchors else len(latest)
+    return any(vid not in checkpoints for vid in latest[:boundary])
 
 
 def scan_new_likes(client, known_main_ids, checkpoints, youtube=False):
@@ -232,7 +239,8 @@ def scan_new_likes(client, known_main_ids, checkpoints, youtube=False):
         liked = getter(limit=limit)
         ids = ids_from_tracks(liked)
         anchors = checkpoints if checkpoints is not None else known_main_ids
-        anchor = next((i for i, vid in enumerate(ids) if vid in anchors), None)
+        positions = [i for i, vid in enumerate(ids) if vid in anchors]
+        anchor = (max(positions) if checkpoints is not None else min(positions)) if positions else None
         if anchor is not None:
             return ids, anchor
         if not liked.get("hasMore", len(ids) >= limit) or limit >= MAX_SCAN:
@@ -253,7 +261,7 @@ def sync(client, target_id, checkpoint_file, dry_run=False, youtube=False):
     scanned_likes = None
     if checkpoints is not None:
         scanned_likes = scan_new_likes(client, set(), checkpoints, youtube)
-        if scanned_likes[1] == 0:
+        if all(vid in checkpoints for vid in scanned_likes[0][:scanned_likes[1]]):
             if not dry_run:
                 save_checkpoints(checkpoint_file, scanned_likes[0])
             print("Новых лайков нет", flush=True)
@@ -265,7 +273,8 @@ def sync(client, target_id, checkpoint_file, dry_run=False, youtube=False):
     liked_ids, anchor = scanned_likes or scan_new_likes(client, known_main_ids, checkpoints, youtube)
     # Если трек уже был добавлен в Main вручную, не дублируем его. Сохраняем
     # порядок остальных лайков перед найденной контрольной позицией.
-    prefix = list(dict.fromkeys(liked_ids[:anchor]))
+    prefix = [vid for vid in dict.fromkeys(liked_ids[:anchor])
+              if checkpoints is None or vid not in checkpoints]
     missing = [vid for vid in prefix if vid not in known_main_ids]
     if youtube:
         missing = [vid for vid in missing if client.is_music_video(vid)]
@@ -300,6 +309,95 @@ def sync(client, target_id, checkpoint_file, dry_run=False, youtube=False):
     return missing
 
 
+class MusicWriter:
+    """Authenticated Music session, separate from the quota-limited Data API."""
+
+    def __init__(self, config, expected_handle):
+        from ytmusicapi import YTMusic
+        self.api = YTMusic(str(config / "music_browser.json"))
+        if self.api.get_account_info().get("channelHandle") != expected_handle:
+            raise RuntimeError("Сессия YouTube Music принадлежит другому каналу")
+
+    def liked_ids(self, full=False):
+        result = self.api.get_liked_songs(limit=None if full else 50)
+        return set(ids_from_tracks(result))
+
+    def rating(self, vid):
+        result = self.api.get_watch_playlist(videoId=vid, limit=1)
+        tracks = result.get("tracks", [])
+        if not tracks or tracks[0].get("videoId") != vid:
+            raise RuntimeError("YouTube Music подменил версию трека; перенос остановлен")
+        return tracks[0].get("likeStatus")
+
+    def rate(self, vid, liked):
+        from ytmusicapi import LikeStatus
+        self.api.rate_song(vid, LikeStatus.LIKE if liked else LikeStatus.INDIFFERENT)
+
+
+def sync_music_likes(client, writer, checkpoint, journal, dry_run=False):
+    """Promote only unseen musical likes; journal an unlike before sending it."""
+    checkpoints = load_checkpoints(checkpoint)
+    if journal.exists():
+        batch = json.loads(journal.read_text(encoding="utf-8"))
+    else:
+        if checkpoints is None:
+            latest = ids_from_tracks(client.get_youtube_liked_songs(limit=50))
+            if latest and not dry_run:
+                save_checkpoints(checkpoint, latest)
+            print("Music bridge: начальная граница; история не переносится", flush=True)
+            return []
+        liked_ids, anchor = scan_new_likes(client, set(), checkpoints, youtube=True)
+        candidates = [vid for vid in dict.fromkeys(liked_ids[:anchor]) if vid not in checkpoints]
+        candidates = [vid for vid in candidates if client.is_music_video(vid)]
+        if dry_run:
+            return candidates
+        if not candidates:
+            save_checkpoints(checkpoint, liked_ids)
+            return []
+        batch = {"recent_liked_ids": liked_ids[:CHECKPOINT_COUNT],
+                 "items": [{"videoId": vid, "phase": "pending"} for vid in reversed(candidates)]}
+        save_json(journal, batch)
+    if dry_run:
+        return [item["videoId"] for item in batch["items"] if item["phase"] != "done"]
+    known = writer.liked_ids(full=True)
+    promoted = []
+    for item in batch["items"]:
+        vid = item["videoId"]
+        if item["phase"] == "done":
+            continue
+        if item["phase"] == "pending":
+            if vid in known or writer.rating(vid) != "LIKE":
+                # Already in Music, or the user has since removed the like.
+                item["phase"] = "done"
+                save_json(journal, batch)
+                continue
+            item["phase"] = "restore_like"
+            save_json(journal, batch)
+            try:
+                writer.rate(vid, False)
+            finally:
+                # An ambiguous unlike response must still restore the user's like.
+                writer.rate(vid, True)
+        else:
+            # Resume an interrupted unlike: never unlike it a second time.
+            writer.rate(vid, True)
+        for attempt in range(5):
+            if vid in writer.liked_ids():
+                break
+            if attempt < 4:
+                time.sleep(2)
+        else:
+            raise RuntimeError(f"Music bridge: лайк {vid} возвращён, но появление в LM не подтверждено")
+        item["phase"] = "done"
+        save_json(journal, batch)
+        known.add(vid)
+        promoted.append(vid)
+        print(f"Добавлено в Понравившуюся музыку: {vid}", flush=True)
+    save_checkpoints(checkpoint, batch["recent_liked_ids"])
+    journal.replace(journal.with_name("music_bridge_completed.json"))
+    return promoted
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="оценить без изменений")
@@ -313,11 +411,26 @@ def main():
         checkpoint = config / "likes_checkpoint.json"
         youtube_checkpoint = config / "youtube_likes_checkpoint.json"
         youtube_enabled = os.environ.get("YOUTUBE_LIKES_TO_MAIN", "false").lower() == "true"
+        bridge_config = config / "music_bridge.json"
+        bridge = json.loads(bridge_config.read_text()) if bridge_config.exists() else {}
+        music_checkpoint = config / "music_likes_checkpoint.json"
+        journal = config / "music_bridge_pending.json"
         if args.probe:
+            if bridge.get("enabled") and journal.exists():
+                return 10
             changed = has_new_likes(client, checkpoint)
-            if youtube_enabled and not changed:
-                changed = has_new_likes(client, youtube_checkpoint, youtube=True)
+            if (youtube_enabled or bridge.get("enabled")) and not changed:
+                latest = ids_from_tracks(client.get_youtube_liked_songs(limit=50))
+                if youtube_enabled:
+                    changed = has_new_likes(client, youtube_checkpoint, youtube=True, latest_ids=latest)
+                if bridge.get("enabled") and not changed:
+                    changed = has_new_likes(client, music_checkpoint, youtube=True, latest_ids=latest)
             return 10 if changed else 0
+        writer = None
+        if bridge.get("enabled") and journal.exists():
+            # Repair any interrupted unlike before quota-limited reads.
+            writer = MusicWriter(config, bridge["channel_handle"])
+            sync_music_likes(client, writer, music_checkpoint, journal, args.dry_run)
         target_id = playlist_id(os.environ["PLAYLIST_URL"])
         youtube_failed = False
         if youtube_enabled:
@@ -331,6 +444,11 @@ def main():
                 if isinstance(exc, QuotaExceeded):
                     raise
         added += sync(client, target_id, checkpoint, args.dry_run)
+        if bridge.get("enabled"):
+            # Main reads the original like order before Music relikes move IDs.
+            if writer is None:
+                writer = MusicWriter(config, bridge["channel_handle"])
+            sync_music_likes(client, writer, music_checkpoint, journal, args.dry_run)
         if args.signal_added and added and not args.dry_run:
             return 10
         if youtube_failed:

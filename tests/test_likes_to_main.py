@@ -5,7 +5,7 @@ from unittest.mock import patch, Mock
 from pathlib import Path
 
 from likes_to_main import (has_new_likes, scan_new_likes, sync, main, save_checkpoints,
-                           load_checkpoints, YouTubeClient, QuotaExceeded)
+                           load_checkpoints, YouTubeClient, QuotaExceeded, sync_music_likes, save_json)
 
 
 class FakeYouTube:
@@ -48,6 +48,165 @@ B = "BBBBBBBBBBB"
 C = "CCCCCCCCCCC"
 D = "DDDDDDDDDDD"
 E = "EEEEEEEEEEE"
+
+
+class FakeMusicWriter:
+    def __init__(self, liked=(), fail_like=False):
+        self.liked = set(liked)
+        self.ratings = {}
+        self.calls = []
+        self.fail_like = fail_like
+
+    def liked_ids(self, full=False):
+        return set(self.liked)
+
+    def rating(self, vid):
+        return self.ratings.get(vid, "LIKE")
+
+    def rate(self, vid, liked):
+        self.calls.append((vid, liked))
+        if liked and self.fail_like:
+            raise RuntimeError("connection lost")
+        if liked:
+            self.liked.add(vid)
+        else:
+            self.liked.discard(vid)
+
+
+class MusicBridgeTests(unittest.TestCase):
+    def test_cli_updates_main_before_music_relikes_change_source_order(self):
+        c = FakeYouTube([C], [C], youtube_liked=[A, C], music_ids={A, C})
+        w = FakeMusicWriter([C])
+        real_rate = w.rate
+        def check_main_then_rate(vid, liked):
+            self.assertIn(vid, c.main)
+            real_rate(vid, liked)
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            for name in ['likes_checkpoint.json', 'youtube_likes_checkpoint.json', 'music_likes_checkpoint.json']:
+                save_checkpoints(p / name, [C])
+            save_json(p / 'music_bridge.json', {'enabled': True, 'channel_handle': '@test'})
+            env = {'CONFIG_DIR': tmp, 'PLAYLIST_URL': 'https://music.youtube.com/playlist?list=MainId',
+                   'YOUTUBE_LIKES_TO_MAIN': 'true'}
+            with patch.dict(os.environ, env), patch('likes_to_main.YouTubeClient', return_value=c), \
+                    patch('likes_to_main.MusicWriter', return_value=w), patch.object(w, 'rate', side_effect=check_main_then_rate), \
+                    patch('sys.argv', ['likes_to_main.py', '--signal-added']):
+                self.assertEqual(main(), 10)
+            self.assertEqual(c.main, [A, C])
+            self.assertIn(A, w.liked)
+
+    def test_probe_shares_one_youtube_read_and_detects_music_only_backlog(self):
+        c = FakeYouTube([C], [A, C], youtube_liked=[A, C])
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)
+            save_checkpoints(p / 'likes_checkpoint.json', [C])
+            save_checkpoints(p / 'youtube_likes_checkpoint.json', [A, C])
+            save_checkpoints(p / 'music_likes_checkpoint.json', [C])
+            save_json(p / 'music_bridge.json', {'enabled': True, 'channel_handle': '@test'})
+            env = {'CONFIG_DIR': tmp, 'YOUTUBE_LIKES_TO_MAIN': 'true'}
+            with patch.dict(os.environ, env), patch('likes_to_main.YouTubeClient', return_value=c), \
+                    patch.object(c, 'get_youtube_liked_songs', wraps=c.get_youtube_liked_songs) as getter, \
+                    patch('likes_to_main.MusicWriter') as writer, patch('sys.argv', ['likes_to_main.py', '--probe']):
+                self.assertEqual(main(), 10)
+                self.assertEqual(getter.call_count, 1)
+                writer.assert_not_called()
+
+    def test_no_checkpoint_bootstraps_without_reliking_history(self):
+        c = FakeYouTube([C], [C], youtube_liked=[A, B, C], music_ids={A, B, C})
+        w = FakeMusicWriter()
+        with tempfile.TemporaryDirectory() as tmp:
+            cp, journal = Path(tmp) / "cp.json", Path(tmp) / "journal.json"
+            self.assertEqual(sync_music_likes(c, w, cp, journal), [])
+            self.assertEqual(w.calls, [])
+            self.assertEqual(load_checkpoints(cp), {A, B, C})
+
+    def test_only_new_music_in_order_skips_old_history_and_existing_music(self):
+        c = FakeYouTube([C], [C], youtube_liked=[A, B, D, C, E], music_ids={A, B, C, E})
+        w = FakeMusicWriter([B, C])
+        with tempfile.TemporaryDirectory() as tmp:
+            cp, journal = Path(tmp) / "cp.json", Path(tmp) / "journal.json"
+            save_checkpoints(cp, [C])
+            self.assertEqual(sync_music_likes(c, w, cp, journal), [A])
+            self.assertEqual(w.calls, [(A, False), (A, True)])
+            self.assertNotIn(E, w.liked)
+            self.assertEqual(sync_music_likes(c, w, cp, journal), [])
+            self.assertEqual(len(w.calls), 2)
+
+    def test_relikes_oldest_first_and_never_edits_main(self):
+        c = FakeYouTube([C], [C], youtube_liked=[A, B, C], music_ids={A, B, C})
+        w = FakeMusicWriter([C])
+        with tempfile.TemporaryDirectory() as tmp:
+            cp, journal = Path(tmp) / "cp.json", Path(tmp) / "journal.json"
+            save_checkpoints(cp, [C])
+            self.assertEqual(sync_music_likes(c, w, cp, journal), [B, A])
+            self.assertEqual(w.calls, [(B, False), (B, True), (A, False), (A, True)])
+            self.assertEqual(c.main, [C])
+
+    def test_failed_restore_keeps_durable_journal_then_only_restores_like(self):
+        c = FakeYouTube([C], [C], youtube_liked=[A, C], music_ids={A, C})
+        w = FakeMusicWriter([C], fail_like=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            cp, journal = Path(tmp) / "cp.json", Path(tmp) / "journal.json"
+            save_checkpoints(cp, [C])
+            with self.assertRaisesRegex(RuntimeError, "connection lost"):
+                sync_music_likes(c, w, cp, journal)
+            self.assertEqual(load_checkpoints(cp), {C})
+            self.assertTrue(journal.exists())
+            w.fail_like = False
+            # Recovery uses the durable batch even if Data API is unavailable.
+            with patch.object(c, "get_youtube_liked_songs", side_effect=QuotaExceeded()):
+                self.assertEqual(sync_music_likes(c, w, cp, journal), [A])
+            self.assertEqual(w.calls, [(A, False), (A, True), (A, True)])
+            self.assertFalse(journal.exists())
+            self.assertIn(A, load_checkpoints(cp))
+
+    def test_like_is_restored_even_when_unlike_response_is_ambiguous(self):
+        c = FakeYouTube([C], [C], youtube_liked=[A, C], music_ids={A, C})
+        w = FakeMusicWriter([C])
+        original = w.rate
+        def fail_after_unlike(vid, liked):
+            original(vid, liked)
+            if not liked:
+                raise RuntimeError("lost unlike response")
+        with tempfile.TemporaryDirectory() as tmp:
+            cp, journal = Path(tmp) / "cp.json", Path(tmp) / "journal.json"
+            save_checkpoints(cp, [C])
+            with patch.object(w, "rate", side_effect=fail_after_unlike):
+                with self.assertRaises(RuntimeError):
+                    sync_music_likes(c, w, cp, journal)
+            self.assertIn(A, w.liked)
+            self.assertTrue(journal.exists())
+            self.assertEqual(load_checkpoints(cp), {C})
+
+    def test_dry_run_does_not_modify_likes_cursor_or_create_journal(self):
+        c = FakeYouTube([C], [C], youtube_liked=[A, C, E], music_ids={A, C, E})
+        w = FakeMusicWriter([C])
+        with tempfile.TemporaryDirectory() as tmp:
+            cp, journal = Path(tmp) / "cp.json", Path(tmp) / "journal.json"
+            save_checkpoints(cp, [C])
+            self.assertEqual(sync_music_likes(c, w, cp, journal, dry_run=True), [A])
+            self.assertEqual(load_checkpoints(cp), {C})
+            self.assertFalse(journal.exists())
+            self.assertEqual(w.calls, [])
+
+    def test_concurrent_like_below_our_reliked_head_is_found_but_old_tail_is_not(self):
+        c = FakeYouTube([C], [C], youtube_liked=[A, B, C, E], music_ids={A, B, C, E})
+        w = FakeMusicWriter([A, C])
+        with tempfile.TemporaryDirectory() as tmp:
+            cp, journal = Path(tmp) / "cp.json", Path(tmp) / "journal.json"
+            save_checkpoints(cp, [A, C])
+            self.assertTrue(has_new_likes(c, cp, youtube=True))
+            self.assertEqual(sync_music_likes(c, w, cp, journal), [B])
+            self.assertNotIn(E, w.liked)
+
+    def test_user_removed_like_is_not_reinstated(self):
+        c = FakeYouTube([C], [C], youtube_liked=[A, C], music_ids={A, C})
+        w = FakeMusicWriter([C]); w.ratings[A] = "INDIFFERENT"
+        with tempfile.TemporaryDirectory() as tmp:
+            cp, journal = Path(tmp) / "cp.json", Path(tmp) / "journal.json"
+            save_checkpoints(cp, [C])
+            self.assertEqual(sync_music_likes(c, w, cp, journal), [])
+            self.assertEqual(w.calls, [])
 
 
 class LikesToMainTests(unittest.TestCase):
