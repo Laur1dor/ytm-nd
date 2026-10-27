@@ -140,7 +140,9 @@ class YouTubeClient:
                 params["pageToken"] = page_token
             page = self._request("GET", "playlistItems", params)
             items = page.get("items", [])
-            scanned += len(items)
+            # Budget requested slots, not returned/valid entries: YouTube may
+            # omit unavailable entries even on a page that has a continuation.
+            scanned += params["maxResults"]
             for item in items:
                 video_id = item.get("contentDetails", {}).get("videoId")
                 if video_id and VIDEO_ID.fullmatch(video_id):

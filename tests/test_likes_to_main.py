@@ -62,8 +62,7 @@ class LikesToMainTests(unittest.TestCase):
         client = object.__new__(YouTubeClient)
         client._request = Mock(return_value={"items": [{}, {"contentDetails": {"videoId": A}}],
                                             "nextPageToken": "older"})
-        # Fill the rest with unavailable raw slots so the probe stays on page one.
-        client._request.return_value["items"] += [{}] * 48
+        # A short page with a continuation must also remain a single probe read.
         with tempfile.TemporaryDirectory() as tmp:
             checkpoint = Path(tmp) / "likes.json"
             save_checkpoints(checkpoint, [C])
