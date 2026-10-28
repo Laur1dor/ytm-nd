@@ -252,6 +252,7 @@ def ordered_ids_via_api(pid: str, key: str) -> list:
     import json
     import urllib.request
     ids, token = [], ""
+    scanned, seen_tokens = 0, set()
     while True:
         url = ("https://www.googleapis.com/youtube/v3/playlistItems"
                f"?part=contentDetails&maxResults=50&playlistId={pid}&key={key}")
@@ -259,13 +260,20 @@ def ordered_ids_via_api(pid: str, key: str) -> list:
             url += f"&pageToken={token}"
         with urllib.request.urlopen(url, timeout=30) as r:
             data = json.load(r)
+        scanned += 50
         for it in data.get("items", []):
             vid = it.get("contentDetails", {}).get("videoId")
             if vid:
                 ids.append(vid)
         token = data.get("nextPageToken")
+        total = data.get("pageInfo", {}).get("totalResults")
+        if isinstance(total, int) and scanned >= total:
+            break
         if not token:
             break
+        if not data.get("items") or token in seen_tokens or len(seen_tokens) >= 199:
+            raise RuntimeError("YouTube повторяет страницы; чтение остановлено для защиты квоты")
+        seen_tokens.add(token)
     return ids
 
 

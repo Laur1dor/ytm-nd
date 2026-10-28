@@ -148,6 +148,11 @@ class YouTubeClient:
                 if video_id and VIDEO_ID.fullmatch(video_id):
                     tracks.append({"videoId": video_id})
             page_token = page.get("nextPageToken")
+            total = page.get("pageInfo", {}).get("totalResults")
+            # YouTube can advertise a continuation past the final hidden slot,
+            # then repeat that token forever. The reported slot count ends it.
+            if isinstance(total, int) and scanned >= total:
+                page_token = None
             if not page_token:
                 break
             if not items or page_token in seen_tokens or len(seen_tokens) >= 199:
