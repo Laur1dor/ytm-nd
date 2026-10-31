@@ -39,7 +39,21 @@ class AlbumTagsTests(unittest.TestCase):
             with patch("mutagen.oggopus.OggOpus", return_value=tags):
                 tag_pass(root)(["song.opus"])
                 self.assertEqual(tags["discnumber"], ["1"])
-                self.assertEqual(tags["date"], ["2011"])
+                self.assertNotIn("date", tags)
+                self.assertEqual(tags["ytm_source_date"], ["2011"])
+
+    def test_opus_date_is_cleaned_even_when_album_disc_and_track_already_match(self):
+        tags = FakeMP4({"album": ["YTM"], "albumartist": ["YouTube Music"],
+                        "tracknumber": ["1"], "discnumber": ["1"], "date": ["20110111"]})
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); (root / "song.opus").touch()
+            with patch("mutagen.oggopus.OggOpus", return_value=tags):
+                run = tag_pass(root); run(["song.opus"])
+                self.assertNotIn("date", tags)
+                self.assertEqual(tags["ytm_source_date"], ["20110111"])
+                self.assertEqual(tags.saves, 1)
+                run(["song.opus"])
+                self.assertEqual(tags.saves, 1)
 
     def test_mp4_release_date_is_removed_even_when_album_and_number_match(self):
         tags = FakeMP4({"\xa9alb": ["YTM"], "aART": ["YouTube Music"],

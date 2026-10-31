@@ -17,7 +17,7 @@ RUN curl -fsSL https://rclone.org/install.sh | bash || true
 # yt-dlp обновляется при каждом старте контейнера (entrypoint).
 # bgutil-ytdlp-pot-provider — клиентский плагин к yt-dlp: ходит за GVS PO Token
 # в соседний контейнер-провайдер. Без токена YouTube отдаёт 403 на аудио-дорожки.
-RUN pip install --no-cache-dir -U "yt-dlp[default]" mutagen bgutil-ytdlp-pot-provider requests ytmusicapi==1.12.3
+RUN pip install --no-cache-dir -U "yt-dlp[default]" mutagen bgutil-ytdlp-pot-provider==2.0.2 requests ytmusicapi==1.12.3
 
 COPY entrypoint.sh /entrypoint.sh
 COPY sync.py /sync.py

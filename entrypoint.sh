@@ -8,7 +8,7 @@ PROBE_INTERVAL="${LIKES_PROBE_SECONDS:-60}"
 upgrade_ytdlp() {
   echo "[ytm-sync] обновляю yt-dlp..."
   if pip install --no-cache-dir --timeout 10 --retries 1 -U \
-      "yt-dlp[default]" bgutil-ytdlp-pot-provider >/tmp/pip.log 2>&1; then
+      "yt-dlp[default]" bgutil-ytdlp-pot-provider==2.0.2 >/tmp/pip.log 2>&1; then
     tail -1 /tmp/pip.log
   else
     echo "[ytm-sync] обновление yt-dlp не удалось, использую установленную версию"

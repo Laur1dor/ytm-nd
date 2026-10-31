@@ -29,7 +29,7 @@ project uses a deliberate split that survived a lot of trial and error:
 | Concern | Approach | Reason |
 |---|---|---|
 | **Get the full track list** | **YouTube Data API v3** (API key) | Anonymous access caps big playlists at ~100 items. Cookies work but **expire within hours** when the account is used elsewhere. An API key never rotates. |
-| **Download audio** | `yt-dlp` with the `tv_simply,mweb` clients + a PO-Token provider | YouTube requires a **GVS PO Token**: without it media URLs return **HTTP 403** and the only remaining format is the fallback 18 (360p muxed, AAC ~96k). With the provider the same clients serve full opus 251. |
+| **Download audio** | `yt-dlp` with the `tv_simply,mweb` clients + a PO-Token provider | Matching provider/plugin versions enable proper audio tracks. Low-quality muxed video fallback is rejected; a missing suitable audio source is reported as a download failure. |
 | **PO Token** | A sidecar `bgutil-provider` container | The token is computed by YouTube's JS engine, which yt-dlp cannot do on its own. The provider only issues tokens for the **web client family** — so Android clients (including `android_vr`) cannot use it. |
 | **Age‑restricted tracks** | `yt-dlp[default]` (bundles `yt-dlp-ejs`) + `deno` + cookies | Solves the JS challenge so age‑gated videos resolve. |
 | **Library structure** | All tracks tagged `ALBUM=YTM`, `ALBUMARTIST=…` | Otherwise every single becomes its own album and floods Navidrome's *Albums* view. |

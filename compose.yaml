@@ -56,7 +56,7 @@ services:
   # Выдаёт yt-dlp GVS PO Token (крутит JS-челлендж YouTube в headless-движке).
   # Наружу не публикуется — доступен только контейнерам этого compose.
   bgutil-provider:
-    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.2
     container_name: bgutil-provider
     restart: unless-stopped
     dns:

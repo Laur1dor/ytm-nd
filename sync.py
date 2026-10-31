@@ -182,8 +182,14 @@ def tag_files(ordered_rels):
         try:
             if ext == ".opus":
                 a = OggOpus(p)
+                cleaned = False
+                for key in ("date", "year", "originaldate", "originalyear", "releasedate"):
+                    if key in a:
+                        a["ytm_source_" + key] = a[key]
+                        del a[key]
+                        cleaned = True
                 if (a.get("album", [""])[0] == ALBUM_NAME and a.get("albumartist", [""])[0] == ALBUM_ARTIST
-                        and a.get("tracknumber", [""])[0] == num and a.get("discnumber") == ["1"]):
+                        and a.get("tracknumber", [""])[0] == num and a.get("discnumber") == ["1"] and not cleaned):
                     continue
                 a["album"] = [ALBUM_NAME]; a["albumartist"] = [ALBUM_ARTIST]; a["tracknumber"] = [num]; a["discnumber"] = ["1"]; a.save()
             elif ext in (".ogg", ".oga"):
@@ -322,7 +328,9 @@ download_cmd = [
     "--ignore-errors", "--no-overwrites", "--no-progress",
     "--download-archive", str(ARCHIVE),
     "--extractor-args", f"youtube:player_client={PLAYER_CLIENT}",
-    "-f", "bestaudio/best", "--extract-audio",
+    # Never fall back to muxed video audio (format 18 may contain AAC at 48 kbps).
+    # Keep normal audio and known full Opus; reject damaged tiny Opus.
+    "-f", 'bestaudio[abr>=110]/bestaudio[format_id="251"][abr>=100]/140', "--extract-audio",
     "--embed-metadata", "--embed-thumbnail",
     # длинные названия (особенно из 4-байтовых юникод-символов) не влезают в лимит
     # имени файла на CIFS — без обрезки трек падает с "[Errno 36] File name too long"
